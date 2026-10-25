@@ -1,0 +1,7 @@
+visit_id,patient_id,fever_temp,body_pain
+v801-91a3-44b2,p101-buea-482a-991f,39.4,True
+v802-12c8-87d1,p102-limbe-781c-432d,38.8,True
+v803-55f4-33a9,p103-douala-319a-554e,37.2,False
+v804-77e2-19c4,p104-yaounde-902b-118c,38.9,True
+v805-33d1-66e8,p105-bamenda-643d-771a,39.7,True
+v806-99a4-55c3,p106-kumba-821f-223b,39.1,True

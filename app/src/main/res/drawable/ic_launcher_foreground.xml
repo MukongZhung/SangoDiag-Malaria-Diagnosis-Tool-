@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Circular diagnostic radar background plate -->
+    <path
+        android:fillColor="#1B7A4E"
+        android:pathData="M54,26 C38.54,26 26,38.54 26,54 C26,69.46 38.54,82 54,82 C69.46,82 82,69.46 82,54 C82,38.54 69.46,26 54,26 Z" />
+    <!-- Outer concentric diagnostic ring -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFD54F"
+        android:strokeWidth="2.5"
+        android:pathData="M54,30 C40.75,30 30,40.75 30,54 C30,67.25 40.75,78 54,78 C67.25,78 78,67.25 78,54 C78,40.75 67.25,30 54,30 Z" />
+    <!-- Bold Medical Cross -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50,38 L58,38 L58,50 L70,50 L70,58 L58,58 L58,70 L50,70 L50,58 L38,58 L38,50 L50,50 Z" />
+    <!-- Center AI Spark / Target core -->
+    <path
+        android:fillColor="#FFB300"
+        android:pathData="M54,50 C51.79,50 50,51.79 50,54 C50,56.21 51.79,58 54,58 C56.21,58 58,56.21 58,54 C58,51.79 56.21,50 54,50 Z" />
+</vector>

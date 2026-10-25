@@ -1,0 +1,6 @@
+{
+  "name": "Malaria Agent",
+  "description": "AI Malaria Diagnosis Agent for Rural Cameroon with Zetaris Federated Data and Meterless H-MEM Persistent Memory.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
