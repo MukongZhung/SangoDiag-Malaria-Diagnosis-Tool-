@@ -140,6 +140,9 @@ app/                 Android design prototype
 |---|---|
 | Mukong Peter Zhung | Problem owner, field context, pitch |
 | Yosr Takouti | Nightshift power layer, H-MEM engine, agent loop, nurse UI |
+| Tiomela Zangue Jorel | Zetaris data layer and dataset, REST API and Android integration, demo video, submission |
+| Joram Kirubi | Team member |
+| Roniald Nchare | Team member |
 
 ## References
 
