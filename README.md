@@ -104,7 +104,22 @@ python -m agent.main --case all --offline --local-data   # rehearsal, no keys ne
 
 ### Zetaris setup (data layer)
 
-Follow the hackathon's Start Here lesson (`./preflight.sh`, `docker compose up -d`, `./verify.sh`). Then put the three CSVs in an S3 bucket Zetaris can reach, register them as tables, and set `ZETARIS_TABLE_*` in `.env` to the registered names. See `synthetic_data/README.md`.
+Follow the hackathon's Start Here lesson (`./preflight.sh`, `docker compose up -d`, `./verify.sh`). Copy the three CSVs into the platform's shared file area, then register them from the SQL Workspace:
+
+```bash
+docker compose exec driver mkdir -p /home/zetaris/customer-data/shared/sangodiag
+for f in patients clinical_visits regional_epidemiology; do
+  docker compose cp synthetic_data/$f.csv driver:/home/zetaris/customer-data/shared/sangodiag/$f.csv
+done
+```
+
+```sql
+CREATE LIGHTNING DATABASE SANGODIAG DESCRIBE BY "SangoDiag malaria data" OPTIONS ()
+CREATE LIGHTNING FILESTORE TABLE patients FROM SANGODIAG FORMAT csv OPTIONS (path "file:///home/zetaris/customer-data/shared/sangodiag/patients.csv", header "true")
+-- same for clinical_visits and regional_epidemiology
+```
+
+Then set `ZETARIS_TABLE_*` in `.env` to `SANGODIAG.patients`, `SANGODIAG.clinical_visits` and `SANGODIAG.regional_epidemiology`, and paste an API key into `ZETARIS_API_KEY`. See `synthetic_data/README.md`.
 
 ## Honest limits
 
