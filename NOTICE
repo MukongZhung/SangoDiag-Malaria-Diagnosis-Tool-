@@ -1,0 +1,7 @@
+SangoDiag includes code derived from Meterless (https://github.com/Meterless/Meterless),
+licensed under the Apache License, Version 2.0:
+
+  agent/hmem/core.py                     Python port of engines/hmem/reference/src (commit 1742dec)
+  tests/conformance/hmem_vectors.json    copied unchanged from engines/hmem/conformance/vectors
+
+Changes from the original are described at the top of agent/hmem/core.py.
