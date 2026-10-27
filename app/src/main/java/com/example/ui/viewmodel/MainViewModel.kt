@@ -7,6 +7,8 @@ import com.example.data.SyntheticDataProvider
 import com.example.data.local.AppDatabase
 import com.example.data.local.HMemEntity
 import com.example.data.models.*
+import com.example.data.remote.AgentApi
+import com.example.data.remote.DiagnoseRequest
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -53,7 +55,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Zetaris SQL Query Studio State
-    private val _currentSql = MutableStateFlow("SELECT p.patient_id, p.village, p.family_history, e.endemic_zone, e.active_cases FROM patients p JOIN regional_epidemiology e ON p.village = e.village WHERE e.endemic_zone = 'High';")
+    private val _currentSql = MutableStateFlow("SELECT p.patient_id, p.age, p.village, p.family_history_malaria, e.endemic_zone, e.active_cases_this_week FROM patients p JOIN regional_epidemiology e ON p.village = e.village WHERE e.endemic_zone = 'High';")
     val currentSql: StateFlow<String> = _currentSql.asStateFlow()
 
     private val _sqlResults = MutableStateFlow<List<Map<String, String>>>(emptyList())
@@ -81,31 +83,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _zetarisApiKey = MutableStateFlow("demo_zetaris_key")
     val zetarisApiKey: StateFlow<String> = _zetarisApiKey.asStateFlow()
 
-    private val _autonomousFieldMode = MutableStateFlow(true)
+    private val _autonomousFieldMode = MutableStateFlow(false)
     val autonomousFieldMode: StateFlow<Boolean> = _autonomousFieldMode.asStateFlow()
 
+    // Python agent API (agent/api.py). 10.0.2.2 is the host PC as seen from the Android emulator.
+    private val _agentBaseUrl = MutableStateFlow("http://10.0.2.2:8000/")
+    val agentBaseUrl: StateFlow<String> = _agentBaseUrl.asStateFlow()
+
     init {
-        // Pre-populate sample H-MEM records if empty
+        // H-MEM starts empty: records are created by real diagnosis sessions
         viewModelScope.launch {
-            val existing = hMemDao.getPatientMemory("123")
-            if (existing == null) {
-                hMemDao.savePatientMemory(
-                    HMemEntity(
-                        patientId = "123",
-                        contextString = "[2026-08-15 Previous Visit]: Treated for uncomplicated malaria in Buea. Fully resolved on Coartem. No reported adverse reactions.",
-                        updatedAt = "2026-08-15 10:20:00",
-                        sessionCount = 1
-                    )
-                )
-                hMemDao.savePatientMemory(
-                    HMemEntity(
-                        patientId = "p101-buea-482a-991f",
-                        contextString = "[2026-09-02 Initial Intake]: Patient confirmed G6PD normal. History of recurrent febrile illness during rainy season.",
-                        updatedAt = "2026-09-02 14:15:00",
-                        sessionCount = 1
-                    )
-                )
-            }
             // Execute default SQL
             runSqlQuery(_currentSql.value)
         }
@@ -169,9 +156,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setAutonomousFieldMode(enabled: Boolean) {
+        _autonomousFieldMode.value = enabled
+    }
+
+    fun setAgentBaseUrl(url: String) {
+        _agentBaseUrl.value = url.trim()
+    }
+
     /**
-     * Executes the end-to-end multi-step Agent Pipeline
-     * mimicking the Python agent loop
+     * Executes the end-to-end multi-step Agent Pipeline.
+     * Online: calls the Python agent API (agent/api.py), which runs the real loop.
+     * Field mode, or backend unreachable: on-device simulation with the same steps.
      */
     fun runAgentDiagnosis() {
         if (_isAgentRunning.value) return
@@ -179,7 +175,129 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isAgentRunning.value = true
             _finalDiagnosis.value = null
+            try {
+                val fallbackReason = if (_autonomousFieldMode.value) null else runBackendDiagnosis()
+                if (_autonomousFieldMode.value || fallbackReason != null) {
+                    runLocalSimulation(fallbackReason)
+                }
+            } finally {
+                _isAgentRunning.value = false
+            }
+        }
+    }
 
+    private fun buildSymptomsText(sym: SymptomsState): String {
+        val signs = listOfNotNull(
+            "headache".takeIf { sym.headache },
+            "body pain".takeIf { sym.bodyPain },
+            "chills".takeIf { sym.chills },
+            "vomiting".takeIf { sym.vomiting }
+        )
+        return "Fever (${sym.feverTemp}°C)" +
+                (if (signs.isNotEmpty()) ", ${signs.joinToString(", ")}" else "") +
+                " for ${sym.durationDays} days"
+    }
+
+    private fun buildTestText(rdt: RdtStatus): String =
+        "RDT Cassette: ${rdt.antigen} line ${if (rdt.isPositive) "positive" else "negative"}" +
+                (if (rdt.hasControlLine) ", control line valid" else ", control line missing (invalid test)")
+
+    /** Returns null on success, or the reason the backend could not be used. */
+    private suspend fun runBackendDiagnosis(): String? {
+        val p = _selectedPatient.value
+        val steps = mutableListOf(
+            AgentExecutionStep(1, "H-MEM", "Memory Retrieval (H-MEM Engine)", StepStatus.RUNNING,
+                "Backend: reading persistent memory for ${p.patientId}..."),
+            AgentExecutionStep(2, "ZETARIS", "Federated SQL Tool Call", StepStatus.RUNNING,
+                "Backend: querying patient record & village epidemiology..."),
+            AgentExecutionStep(3, "NIGHTSHIFT", "NVIDIA Nemotron Reasoning", StepStatus.RUNNING,
+                "Backend: running the agent loop..."),
+            AgentExecutionStep(4, "H-MEM-SAVE", "Persistent Memory Commit", StepStatus.PENDING,
+                "Waiting for diagnosis...")
+        )
+        _executionSteps.value = steps.toList()
+
+        val started = System.currentTimeMillis()
+        val resp = try {
+            AgentApi.create(_agentBaseUrl.value).diagnose(
+                DiagnoseRequest(
+                    patientId = p.patientId,
+                    symptoms = buildSymptomsText(_symptoms.value),
+                    imageResult = buildTestText(_rdtStatus.value)
+                )
+            )
+        } catch (e: Exception) {
+            return "Backend ${_agentBaseUrl.value} unreachable (${e.javaClass.simpleName}: ${e.message})"
+        }
+        val elapsed = System.currentTimeMillis() - started
+
+        val a = resp.assessment
+        val lastCall = resp.llmCalls.lastOrNull()
+        val online = resp.llmCalls.any { it.mode == "nightshift" }
+        val audit = NightshiftAudit(
+            targetModel = _meterlessModel.value,
+            executedModel = lastCall?.executedModel ?: "not reported",
+            routingLane = lastCall?.routingLane ?: "not reported",
+            latencyMs = elapsed,
+            mode = if (online) "Nightshift" else "Backend offline rules"
+        )
+
+        steps[0] = steps[0].copy(
+            status = StepStatus.SUCCESS,
+            subtitle = if (resp.memoryBefore != null) "Prior sessions found" else "No prior session (new intake)",
+            details = "H-MEM Retrieved Context:\n${resp.memoryBefore ?: "None"}"
+        )
+        steps[1] = steps[1].copy(
+            status = StepStatus.SUCCESS,
+            subtitle = "${resp.sqlQueries.size} query(ies), ${resp.sqlRows.size} row(s) returned",
+            details = resp.sqlQueries.joinToString("\n\n")
+        )
+        steps[2] = steps[2].copy(
+            status = StepStatus.SUCCESS,
+            subtitle = "${resp.llmCalls.size} turn(s) · ${audit.mode}",
+            details = resp.llmCalls.joinToString("\n") {
+                "Turn: ${it.mode} | model=${it.executedModel ?: "?"} | ${it.latencyMs}ms"
+            }
+        )
+        steps[3] = steps[3].copy(
+            status = StepStatus.SUCCESS,
+            subtitle = "Encounter note saved to H-MEM",
+            details = "Saved Context Delta:\n${resp.memorySavedNote}"
+        )
+        _executionSteps.value = steps.toList()
+
+        // Mirror the note locally so the H-MEM screen reflects the backend session
+        saveHMemContext(p.patientId, resp.memorySavedNote)
+
+        val prescription = a.coartemTabletsPerDose?.let { "${a.treatment} - $it tablet(s) per dose" } ?: a.treatment
+        val temp = a.temperature
+        _finalDiagnosis.value = DiagnosisResult(
+            patientId = resp.patientId,
+            badgeLabel = when {
+                a.isSevere -> "SEVERE malaria"
+                a.testResult == "positive" -> "P. falciparum (+)"
+                a.testResult == "negative" -> "Malaria (-)"
+                else -> "Not confirmed"
+            },
+            testPositive = a.testResult == "positive",
+            isSevere = a.isSevere,
+            clinicalSummary = resp.report.replace("**", "").replace("### ", ""),
+            prescriptionAct = prescription,
+            supportiveCare = if (temp != null && temp > 38.5 && !a.isSevere)
+                "Paracetamol 15 mg/kg (adult 1 g) every 6 hours; oral rehydration salts (ORS)."
+            else "Clinical monitoring; follow the referral plan if danger signs appear.",
+            dangerSigns = if (a.severeSigns.isNotEmpty()) a.severeSigns.map { "DETECTED: $it" } else STANDARD_DANGER_SIGNS,
+            sqlQuery = resp.sqlQueries.lastOrNull() ?: "",
+            sqlRowsReturned = resp.sqlRows.size,
+            hMemBefore = resp.memoryBefore,
+            hMemSavedNote = resp.memorySavedNote,
+            audit = audit
+        )
+        return null
+    }
+
+    private suspend fun runLocalSimulation(fallbackReason: String?) {
+        run {
             val p = _selectedPatient.value
             val sym = _symptoms.value
             val rdt = _rdtStatus.value
@@ -254,20 +372,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             // Step 3: Nightshift LLM (NVIDIA Nemotron 30B / 120B)
             delay(800)
+            // No LLM is called on-device: say so instead of reporting a model
             val audit = NightshiftAudit(
-                targetModel = "nvidia/nemotron-3.5-lightning-30b-a3b",
-                executedModel = "nvidia/nemotron-3-super-120b-a12b",
-                routingLane = "nvidia-accelerated-lane-a3b",
-                latencyMs = 384L,
-                tokensPerSec = 118
+                targetModel = _meterlessModel.value,
+                executedModel = "none (on-device rules)",
+                routingLane = "n/a",
+                latencyMs = 0L,
+                mode = "On-device simulation"
             )
-            val auditDetails = "Model: ${audit.executedModel}\n" +
-                    "Routing Lane: ${audit.routingLane}\n" +
-                    "Latency: ${audit.latencyMs}ms | Speed: ${audit.tokensPerSec} tok/s\n" +
-                    "Headers: ${audit.appHeader} | ${audit.scopeHeader}"
+            val auditDetails = "Mode: ${audit.mode}\n" +
+                    (fallbackReason?.let { "Reason: $it\n" } ?: "Field mode enabled in Settings\n") +
+                    "Headers (when online): ${audit.appHeader} | ${audit.scopeHeader}"
             steps[2] = steps[2].copy(
                 status = StepStatus.SUCCESS,
-                subtitle = "Synthesized clinical guidance via ${audit.executedModel}",
+                subtitle = "Rule-based guidance (no network)",
                 details = auditDetails
             )
             steps[3] = steps[3].copy(status = StepStatus.RUNNING)
@@ -278,8 +396,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
             val encounterNote = "Temp: ${sym.feverTemp}°C, Chills: ${sym.chills}, Vomiting: ${sym.vomiting} | " +
                     "RDT: ${if (rdt.isPositive) "POSITIVE" else "NEGATIVE"} | " +
-                    "Microscopy: ${micro.parasitesPerMicroLiter} / μL | " +
-                    "Prescribed Artemether-Lumefantrine 6-dose regimen"
+                    (if (rdt.isPositive) "Microscopy: ${micro.parasitesPerMicroLiter} / μL | Prescribed Artemether-Lumefantrine 6-dose regimen"
+                    else "No antimalarial; investigate other causes of fever")
             saveHMemContext(p.patientId, encounterNote)
 
             steps[3] = steps[3].copy(
@@ -308,15 +426,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             val result = DiagnosisResult(
                 patientId = p.patientId,
+                badgeLabel = if (rdt.isPositive) "P. falciparum (+)" else "Malaria (-)",
+                testPositive = rdt.isPositive,
+                isSevere = false,
                 clinicalSummary = summary,
                 prescriptionAct = actPrescription,
                 supportiveCare = "Paracetamol 1000mg PO TDS for 48h for fever (${sym.feverTemp}°C); Oral Rehydration Salts (ORS) for fluid loss.",
-                dangerSigns = listOf(
-                    "Impaired consciousness, lethargy, or extreme prostration",
-                    "Persistent vomiting preventing oral medication ingestion",
-                    "Respiratory distress, deep acidotic breathing, or convulsions",
-                    "Dark/black-water urine or clinical jaundice (urgent referral for IV Artesunate)"
-                ),
+                dangerSigns = STANDARD_DANGER_SIGNS,
                 sqlQuery = sqlQuery,
                 sqlRowsReturned = rows.size,
                 hMemBefore = memoryDetails,
@@ -325,7 +441,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
 
             _finalDiagnosis.value = result
-            _isAgentRunning.value = false
         }
+    }
+
+    companion object {
+        val STANDARD_DANGER_SIGNS = listOf(
+            "Impaired consciousness, lethargy, or extreme prostration",
+            "Persistent vomiting preventing oral medication ingestion",
+            "Respiratory distress, deep acidotic breathing, or convulsions",
+            "Dark/black-water urine or clinical jaundice (urgent referral for IV Artesunate)"
+        )
     }
 }

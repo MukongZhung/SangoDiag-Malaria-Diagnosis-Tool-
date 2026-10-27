@@ -17,8 +17,11 @@ import sqlite3
 import datetime
 from typing import Optional, List, Dict, Any
 
-# Path to persistent SQLite database file
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "h_mem.db")
+# Path to persistent SQLite database file (override with H_MEM_DB_PATH, e.g. for tests)
+DB_PATH = os.environ.get(
+    "H_MEM_DB_PATH",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "h_mem.db"),
+)
 
 
 def _init_db() -> None:

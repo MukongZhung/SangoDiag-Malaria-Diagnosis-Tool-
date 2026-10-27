@@ -28,7 +28,7 @@ fun HMemScreen(
 ) {
     val memories by viewModel.allMemories.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
-    var selectedPatientId by remember { mutableStateOf("123") }
+    var selectedPatientId by remember { mutableStateOf("a1c3e5f7-2b4d-4c6e-8f10-1a2b3c4d5e01") }
     var memoryNoteText by remember { mutableStateOf("") }
 
     LazyColumn(
@@ -151,7 +151,7 @@ fun HMemScreen(
                         value = selectedPatientId,
                         onValueChange = { selectedPatientId = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Patient ID (e.g. 123)") }
+                        label = { Text("Patient ID (UUID from patients.csv)") }
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     OutlinedTextField(

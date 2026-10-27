@@ -178,11 +178,11 @@ fun FinalDiagnosisReportView(
                 }
 
                 Badge(
-                    containerColor = Color(0xFFFFEBEE),
-                    contentColor = Color(0xFFC62828)
+                    containerColor = if (result.testPositive) Color(0xFFFFEBEE) else Color(0xFFE8F5E9),
+                    contentColor = if (result.testPositive) Color(0xFFC62828) else Color(0xFF2E7D32)
                 ) {
                     Text(
-                        text = "P. falciparum (+)",
+                        text = result.badgeLabel,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
@@ -227,7 +227,7 @@ fun FinalDiagnosisReportView(
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
-                        text = "💊 First-Line ACT: ${result.prescriptionAct}",
+                        text = "💊 Treatment: ${result.prescriptionAct}",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -236,12 +236,14 @@ fun FinalDiagnosisReportView(
                         text = "💧 Supportive Care: ${result.supportiveCare}",
                         style = MaterialTheme.typography.bodySmall
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "⚠️ Absorption Rule: Must ingest with milk or oily/fatty meal for lumefantrine bioavailability.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    if (result.testPositive && !result.isSevere) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "⚠️ Absorption Rule: Must ingest with milk or oily/fatty meal for lumefantrine bioavailability.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 
@@ -296,13 +298,13 @@ fun FinalDiagnosisReportView(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "NVIDIA Nemotron Routing Audit (Judges)",
+                            text = "Nightshift Routing Audit",
                             color = Color(0xFF81C784),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "${result.audit.tokensPerSec} tok/s",
+                            text = result.audit.mode,
                             color = Color(0xFFFFD54F),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold

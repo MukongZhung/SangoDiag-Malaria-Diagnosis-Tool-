@@ -54,14 +54,18 @@ An autonomous, grounded clinical AI agent designed for frontline healthcare work
 │   ├── llm.py            # Power Layer: Meterless Nightshift API client (NVIDIA Nemotron)
 │   ├── tools_zetaris.py  # Data Layer: Zetaris REST SQL tool with UUID Request IDs
 │   ├── engine_h_mem.py   # Build Layer: H-MEM Persistent Memory Engine (SQLite)
-│   └── main.py           # Orchestration Agent Loop with tool calling
+│   ├── clinical_rules.py # Safety Layer: deterministic WHO/MINSANTE rules (offline mode + severe-malaria check)
+│   ├── main.py           # Orchestration Agent Loop with tool calling
+│   └── api.py            # REST API (FastAPI) used by the Android field app
 ├── synthetic_data/
-│   ├── patients.csv              # Patient demographic & family history
-│   ├── clinical_visits.csv       # Clinical vitals (temp, body pain)
-│   └── regional_epidemiology.csv # Endemicity zones (Buea, Limbe, Douala, Yaoundé, etc.)
+│   ├── patients.csv              # Age, sex, village, malaria family history, recent travel
+│   ├── clinical_visits.csv       # Visit date, temperature (may be missing), body pain, headache, nausea
+│   └── regional_epidemiology.csv # Endemic zone, active cases this week, breeding-site risk (10 towns)
 ├── tests/
 │   ├── __init__.py
-│   └── test_engine.py    # Pytest suite verifying H-MEM persistence
+│   ├── conftest.py       # Isolates the test database, forces offline mode
+│   ├── test_engine.py    # Pytest suite verifying H-MEM persistence
+│   └── test_clinical_rules.py # Rules engine + end-to-end agent loop tests
 ├── app/                  # Companion Native Android Field Diagnostic Station (Compose)
 ├── requirements.txt      # Python dependencies
 ├── .env.example          # Template environment configurations
@@ -92,7 +96,7 @@ Key variables:
 - `ZETARIS_ORG_ID`: `1`
 - `ZETARIS_BASE_URL`: `http://localhost:8888/api/v1.0`
 
-*(Note: The system contains an autonomous local high-fidelity fallback, so it runs completely out of the box even without live external credentials!)*
+*(Note: `.env` is loaded automatically. Without credentials the agent runs in **offline mode**: SQL runs on the local CSVs and the diagnosis comes from the deterministic rules in `agent/clinical_rules.py`. The routing audit says so explicitly. With credentials, Nemotron answers and the rules still add a safety alert when danger signs are detected.)*
 
 ### 3. Run the Clinical Agent Simulation
 ```bash
@@ -101,8 +105,19 @@ python agent/main.py
 
 ### 4. Run the Engine Verification Test
 ```bash
-pytest tests/test_engine.py
+python -m pytest tests -v
 ```
+
+### 5. Connect the Android Field App
+Start the agent API on your PC:
+```bash
+python -m uvicorn agent.api:app --host 0.0.0.0 --port 8000 --ws none
+```
+Endpoints: `GET /health`, `POST /diagnose`, `POST /sql`, `GET /memory`, `GET /memory/{patient_id}` (interactive docs at `/docs`).
+
+In the app, open **Settings**: leave *Autonomous Field Engine* off and set `AGENT_BASE_URL`
+(`http://10.0.2.2:8000/` on the emulator, `http://<PC-IP>:8000/` on a phone on the same Wi-Fi).
+The Diagnose screen then runs the real agent loop. If the backend is unreachable, the app falls back to its on-device simulation and says so in the audit card.
 
 ---
 

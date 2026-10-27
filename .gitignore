@@ -19,3 +19,5 @@ debug.keystore
 debug.keystore.base64
 h_mem.db
 .build-outputs/
+__pycache__/
+.pytest_cache/

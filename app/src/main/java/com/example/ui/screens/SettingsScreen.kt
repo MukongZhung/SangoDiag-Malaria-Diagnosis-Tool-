@@ -27,6 +27,7 @@ fun SettingsScreen(
     val zetarisUrl by viewModel.zetarisBaseUrl.collectAsState()
     val zetarisApiKey by viewModel.zetarisApiKey.collectAsState()
     val autonomousMode by viewModel.autonomousFieldMode.collectAsState()
+    val agentBaseUrl by viewModel.agentBaseUrl.collectAsState()
 
     LazyColumn(
         modifier = modifier
@@ -68,15 +69,49 @@ fun SettingsScreen(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Enables onboard high-fidelity Nemotron reasoning and local SQLite federation when deployed in remote Cameroonian clinics without cellular connectivity.",
+                            text = "Runs an on-device rule-based simulation instead of calling the agent backend. Use it in clinics without connectivity. When off, the app falls back to it automatically if the backend is unreachable.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Switch(
                         checked = autonomousMode,
-                        onCheckedChange = { /* toggle */ },
+                        onCheckedChange = { viewModel.setAutonomousFieldMode(it) },
                         modifier = Modifier.testTag("autonomous_mode_switch")
+                    )
+                }
+            }
+        }
+
+        // Agent Backend (Python API) Config
+        item {
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Agent Backend (agent/api.py)",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Emulator: http://10.0.2.2:8000/ · Phone on the same Wi-Fi: http://<PC-IP>:8000/",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = agentBaseUrl,
+                        onValueChange = { viewModel.setAgentBaseUrl(it) },
+                        label = { Text("AGENT_BASE_URL") },
+                        singleLine = true,
+                        enabled = !autonomousMode,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("agent_base_url_field")
                     )
                 }
             }

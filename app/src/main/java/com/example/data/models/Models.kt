@@ -7,23 +7,26 @@ data class Patient(
     val familyHistory: Boolean,
     val age: Int,
     val gender: String,
+    val recentTravel: Boolean = false,
     val phone: String = "+237 6XX-XX-XX-XX"
 )
 
 data class ClinicalVisit(
     val visitId: String,
     val patientId: String,
-    val feverTemp: Float,
+    val feverTemp: Float?, // null when not measured at the visit
     val bodyPain: Boolean,
-    val date: String = "2026-10-24"
+    val headache: Boolean,
+    val nausea: Boolean,
+    val date: String
 )
 
 data class EpidemiologyZone(
     val village: String,
     val region: String,
     val endemicZone: String, // "High", "Medium", "Low"
-    val activeCases: Int,
-    val vectorRisk: String = "Anopheles gambiae high density"
+    val activeCases: Int, // active_cases_this_week
+    val breedingSiteRisk: String
 )
 
 data class SymptomsState(
@@ -68,13 +71,16 @@ data class NightshiftAudit(
     val executedModel: String,
     val routingLane: String,
     val latencyMs: Long,
-    val tokensPerSec: Int,
+    val mode: String, // "Nightshift", "Backend offline rules" or "On-device simulation"
     val appHeader: String = "meterless-app: malaria-agent",
     val scopeHeader: String = "meterless-scope: user"
 )
 
 data class DiagnosisResult(
     val patientId: String,
+    val badgeLabel: String,
+    val testPositive: Boolean,
+    val isSevere: Boolean,
     val clinicalSummary: String,
     val prescriptionAct: String,
     val supportiveCare: String,

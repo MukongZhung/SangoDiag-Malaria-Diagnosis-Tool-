@@ -217,13 +217,17 @@ def test_h_mem_nonexistent_patient():
 """.trimIndent(),
 
             "synthetic_data/patients.csv" to """
-patient_id,village,family_history
-p101-buea-482a-991f,Buea,True
-p102-limbe-781c-432d,Limbe,False
-p103-douala-319a-554e,Douala,True
-p104-yaounde-902b-118c,Yaoundé,False
-p105-bamenda-643d-771a,Bamenda,True
-p106-kumba-821f-223b,Kumba,True
+patient_id,age,gender,village,family_history_malaria,recent_travel
+a1c3e5f7-2b4d-4c6e-8f10-1a2b3c4d5e01,34,F,Limbe,TRUE,FALSE
+b2d4f6a8-3c5e-4d7f-9a21-2b3c4d5e6f02,27,M,Ebolowa,TRUE,TRUE
+c3e5a7b9-4d6f-4e8a-a132-3c4d5e6f7a03,6,F,Kribi,FALSE,FALSE
+d4f6b8c0-5e7a-4f9b-b243-4d5e6f7a8b04,52,M,Bertoua,TRUE,FALSE
+e5a7c9d1-6f8b-4a0c-8354-5e6f7a8b9c05,41,F,Buea,FALSE,TRUE
+f6b8d0e2-7a9c-4b1d-9465-6f7a8b9c0d06,23,F,Bafoussam,FALSE,FALSE
+a7c9e1f3-8b0d-4c2e-a576-7a8b9c0d1e07,31,M,Dschang,FALSE,FALSE
+b8d0f2a4-9c1e-4d3f-b687-8b9c0d1e2f08,65,M,Bamenda,FALSE,FALSE
+c9e1a3b5-0d2f-4e4a-8798-9c0d1e2f3a09,3,M,Garoua,TRUE,FALSE
+d0f2b4c6-1e3a-4f5b-98a9-0d1e2f3a4b10,19,F,Mbalmayo,FALSE,TRUE
 """.trimIndent(),
 
             "README.md" to """

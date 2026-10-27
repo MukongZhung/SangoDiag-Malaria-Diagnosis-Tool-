@@ -5,6 +5,7 @@ for clinical reasoning and tool-calling in rural healthcare diagnostics.
 """
 
 import os
+import re
 import json
 import logging
 from typing import Dict, Any, List, Optional
@@ -14,6 +15,9 @@ except ImportError:
     requests = None
 import urllib.request
 import urllib.error
+
+from agent import clinical_rules
+from agent.tools_zetaris import patient_baseline_sql
 
 logger = logging.getLogger("NightshiftLLM")
 METERLESS_BASE_URL = os.environ.get("METERLESS_BASE_URL", "https://runtime.meterless.ai/v1").rstrip("/")
@@ -26,6 +30,12 @@ def call_nightshift(messages: List[Dict[str, Any]], tools: Optional[List[Dict[st
     Call Meterless Nightshift OpenAI-compatible chat completions endpoint.
     Routes to NVIDIA Nemotron models with exact hackathon required headers.
     """
+    # A local Meterless runtime (127.0.0.1 / localhost) needs no token
+    is_local_runtime = any(h in METERLESS_BASE_URL for h in ("127.0.0.1", "localhost"))
+    if not METERLESS_RUNTIME_TOKEN and not is_local_runtime:
+        logger.info("METERLESS_RUNTIME_TOKEN not set. Running in offline rules mode.")
+        return _autonomous_fallback_response(messages, tools)
+
     endpoint = f"{METERLESS_BASE_URL}/chat/completions"
 
     headers = {
@@ -54,7 +64,7 @@ def call_nightshift(messages: List[Dict[str, Any]], tools: Optional[List[Dict[st
                 print_routing_info(data)
                 return data
             else:
-                logger.warning("Nightshift API status %s. Using local autonomous Nemotron engine fallback.", response.status_code)
+                logger.warning("Nightshift API status %s. Falling back to offline rules mode.", response.status_code)
                 return _autonomous_fallback_response(messages, tools)
         else:
             req_data = json.dumps(payload).encode("utf-8")
@@ -66,114 +76,100 @@ def call_nightshift(messages: List[Dict[str, Any]], tools: Optional[List[Dict[st
                 return data
 
     except Exception as e:
-        logger.info("Nightshift remote endpoint connection: %s. Activating autonomous local Nemotron engine.", e)
+        logger.info("Nightshift remote endpoint connection: %s. Falling back to offline rules mode.", e)
         return _autonomous_fallback_response(messages, tools)
 
 
 def print_routing_info(response: Dict[str, Any]) -> None:
     """
-    Extracts and prints which model/lane Nightshift used
-    from response headers or usage metadata to prove to hackathon judges
-    that NVIDIA Nemotron was utilized.
+    Prints which model/lane actually served the request, using only what the
+    response reports. Nothing is shown that the runtime did not return.
     """
-    headers = response.get("_headers", {})
-    model_used = response.get("model", METERLESS_MODEL)
-    routing_lane = headers.get("x-meterless-lane") or headers.get("x-nightshift-lane") or "nvidia-accelerated-lane-a3b"
-    latency = headers.get("x-response-time") or "312ms"
+    headers = {k.lower(): v for k, v in response.get("_headers", {}).items()}
+    is_fallback = response.get("_fallback", False)
 
     print("\n" + "=" * 55)
-    print("  METERLESS NIGHTSHIFT ROUTING AUDIT (FOR JUDGES)")
+    print("  METERLESS NIGHTSHIFT ROUTING AUDIT")
     print("=" * 55)
     print(f" Target Model : {METERLESS_MODEL}")
-    print(f" Executed By  : {model_used}")
-    print(f" Routing Lane : {routing_lane}")
-    print(f" App Header   : meterless-app: malaria-agent")
-    print(f" Scope        : meterless-scope: user")
-    print(f" Tokens / Sec : 118 tok/s [NVIDIA TensorRT-LLM]")
-    print(f" Latency      : {latency}")
+    if is_fallback:
+        print(" Executed By  : LOCAL RULES ENGINE (offline - no remote call made)")
+    else:
+        print(f" Executed By  : {response.get('model', 'not reported')}")
+        print(f" Routing Lane : {headers.get('x-meterless-lane') or headers.get('x-nightshift-lane') or 'not reported'}")
+        print(f" Latency      : {headers.get('x-response-time') or 'not reported'}")
+        usage = response.get("usage") or {}
+        if usage:
+            print(f" Tokens       : {usage.get('prompt_tokens', '?')} in / {usage.get('completion_tokens', '?')} out")
+    print(" App Header   : meterless-app: malaria-agent")
+    print(" Scope        : meterless-scope: user")
     print("=" * 55 + "\n")
+
+
+def _extract_field(text: str, label: str) -> str:
+    match = re.search(rf"^{re.escape(label)}:\s*(.*)$", text or "", re.MULTILINE)
+    return match.group(1).strip() if match else ""
 
 
 def _autonomous_fallback_response(messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """
-    Autonomous high-fidelity Nemotron simulator for offline local field testing
-    and hackathon demos when remote live tokens are not configured in local environment.
+    Offline mode for field posts without connectivity (or without credentials).
+    Mimics the tool-calling flow, but the diagnosis comes from the deterministic
+    rules in clinical_rules.py applied to the real case and the real Zetaris rows.
     """
-    has_tool_result = any(m.get("role") == "tool" for m in messages)
-    
-    # Check if we should call the run_sql tool
-    if tools and not has_tool_result:
-        # Step 1: Model decides to call run_sql to inspect endemicity and patient records
-        patient_query = "SELECT p.patient_id, p.village, p.family_history, e.endemic_zone, e.active_cases " \
-                        "FROM patients p JOIN regional_epidemiology e ON p.village = e.village " \
-                        "WHERE p.patient_id = '123' OR p.patient_id LIKE '%101%';"
-        
-        simulated_response = {
-            "id": "chatcmpl-nightshift-nemotron-toolcall-001",
-            "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [
-                            {
-                                "id": "call_zetaris_sql_001",
-                                "type": "function",
-                                "function": {
-                                    "name": "run_sql",
-                                    "arguments": json.dumps({"query": patient_query})
-                                }
-                            }
-                        ]
-                    },
-                    "finish_reason": "tool_calls"
-                }
-            ],
-            "_headers": {
-                "x-meterless-lane": "nvidia-nemotron-a3b-optimized",
-                "x-response-time": "240ms"
-            }
-        }
-        print_routing_info(simulated_response)
-        return simulated_response
-    else:
-        # Step 2: Final grounded diagnosis after SQL results are fed back
-        diagnosis_content = (
-            "### CLINICAL ASSESSMENT & MALARIA DIAGNOSIS (CAMEROON PROTOCOL)\n\n"
-            "**1. Epidemiological Grounding (Zetaris Federated Data):**\n"
-            "- Patient resides in Buea (Southwest Region), classified as a **HIGH endemic zone** (active cluster: 42 cases).\n"
-            "- Confirmed clinical fever (39.4°C) with acute myalgia, headache, and positive family history.\n\n"
-            "**2. Diagnostic Confirmation:**\n"
-            "- Rapid Diagnostic Test (RDT): **Positive for Plasmodium falciparum** (HRP-2 antigen detected).\n"
-            "- Microscopy Blood Smear: Trophozoites identified (~18,500 parasites/μL, moderate density).\n\n"
-            "**3. Recommended Treatment Plan (WHO & Cameroon MoH Standard):**\n"
-            "- **First-Line ACT:** Artemether 20mg / Lumefantrine 120mg (Coartem) - 4 tablets immediately at hour 0, "
-            "followed by 4 tablets at 8 hours, then 4 tablets BID for the next 2 days (total 6-dose regimen with fatty food/milk).\n"
-            "- **Symptomatic Relief:** Paracetamol 1000mg PO QDS for 48 hours for hyperpyrexia (39.4°C).\n"
-            "- **Hydration & Nursing Care:** Oral rehydration salts (ORS), rest under insecticide-treated bed nets (ITN).\n"
-            "- **Red Flags for Urgent Escalation:** Persistent vomiting, altered mental status/delirium, jaundice, "
-            "or hemoglobinuria require immediate transfer to Buea Regional Hospital for IV Artesunate."
-        )
+    user_text = next((m.get("content", "") for m in messages if m.get("role") == "user"), "")
+    patient_id = _extract_field(user_text, "Patient ID")
+    tool_messages = [m for m in messages if m.get("role") == "tool"]
 
-        simulated_response = {
-            "id": "chatcmpl-nightshift-nemotron-diagnosis-002",
-            "model": "nvidia/nemotron-3-super-120b-a12b",
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": diagnosis_content
-                    },
-                    "finish_reason": "stop"
-                }
-            ],
-            "_headers": {
-                "x-meterless-lane": "nvidia-nemotron-120b-super-reasoning",
-                "x-response-time": "410ms"
-            }
+    if tools and not tool_messages:
+        patient_query = patient_baseline_sql(patient_id)
+        response = {
+            "id": "local-fallback-toolcall",
+            "model": "local-rules-engine",
+            "_fallback": True,
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{
+                        "id": "call_zetaris_sql_001",
+                        "type": "function",
+                        "function": {"name": "run_sql", "arguments": json.dumps({"query": patient_query})}
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
         }
-        print_routing_info(simulated_response)
-        return simulated_response
+    else:
+        records: List[Dict[str, Any]] = []
+        for m in tool_messages:
+            try:
+                data = json.loads(m.get("content") or "[]")
+            except ValueError:
+                continue
+            if isinstance(data, list):
+                records.extend(r for r in data if isinstance(r, dict))
+
+        weight_match = re.match(r"([\d.]+)\s*kg", _extract_field(user_text, "Body Weight"))
+        weight_kg = float(weight_match.group(1)) if weight_match else None
+        assessment = clinical_rules.assess(
+            patient_id,
+            _extract_field(user_text, "Presenting Symptoms"),
+            _extract_field(user_text, "Rapid Diagnostic / Microscopy Image Result"),
+            records,
+            weight_kg,
+        )
+        response = {
+            "id": "local-fallback-diagnosis",
+            "model": "local-rules-engine",
+            "_fallback": True,
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": clinical_rules.render_report(assessment)},
+                "finish_reason": "stop"
+            }]
+        }
+
+    print_routing_info(response)
+    return response

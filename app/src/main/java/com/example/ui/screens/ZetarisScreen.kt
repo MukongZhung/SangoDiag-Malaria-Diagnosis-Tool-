@@ -156,7 +156,7 @@ fun ZetarisScreen(
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    text = "Active Cases: ${zone.activeCases}",
+                                    text = "Active cases this week: ${zone.activeCases} · Breeding risk: ${zone.breedingSiteRisk}",
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.primary

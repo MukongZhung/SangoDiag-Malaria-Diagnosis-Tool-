@@ -19,6 +19,28 @@ ZETARIS_API_KEY = os.environ.get("ZETARIS_API_KEY", "")
 ZETARIS_ORG_ID = os.environ.get("ZETARIS_ORG_ID", "1")
 ZETARIS_BASE_URL = os.environ.get("ZETARIS_BASE_URL", "http://localhost:8888/api/v1.0").rstrip("/")
 
+# Federated tables exposed to the LLM (hackathon dataset schema)
+TABLE_SCHEMAS = {
+    "patients": "patient_id, age, gender, village, family_history_malaria, recent_travel",
+    "clinical_visits": "visit_id, patient_id, visit_date, fever_temp_c, body_pain, headache, nausea",
+    "regional_epidemiology": "village, endemic_zone, active_cases_this_week, breeding_site_risk",
+}
+
+
+def patient_baseline_sql(patient_id: str) -> str:
+    """Patient record + latest visit + village epidemiology, in one federated query."""
+    safe_id = str(patient_id).replace("'", "''")
+    return (
+        "SELECT p.patient_id, p.age, p.gender, p.village, p.family_history_malaria, p.recent_travel, "
+        "e.endemic_zone, e.active_cases_this_week, e.breeding_site_risk, "
+        "v.visit_date, v.fever_temp_c, v.body_pain, v.headache, v.nausea "
+        "FROM patients p "
+        "LEFT JOIN regional_epidemiology e ON p.village = e.village "
+        "LEFT JOIN clinical_visits v ON p.patient_id = v.patient_id "
+        f"WHERE p.patient_id = '{safe_id}' "
+        "ORDER BY v.visit_date DESC LIMIT 1;"
+    )
+
 
 def run_sql(query: str) -> Union[List[Dict[str, Any]], Dict[str, str]]:
     """
@@ -46,6 +68,10 @@ def run_sql(query: str) -> Union[List[Dict[str, Any]], Dict[str, str]]:
     print(f"\n[Zetaris Tool] Executing SQL Query via Request-ID: {request_id}")
     print(f"[Zetaris Tool] Query: {query}")
 
+    if not ZETARIS_API_KEY:
+        logger.info("ZETARIS_API_KEY not set. Using local synthetic federation.")
+        return _execute_local_synthetic_sql(query)
+
     try:
         if requests is not None:
             response = requests.post(endpoint, headers=headers, json=payload, timeout=15)
@@ -57,6 +83,7 @@ def run_sql(query: str) -> Union[List[Dict[str, Any]], Dict[str, str]]:
                     return result
                 return [result]
             else:
+                logger.warning("Zetaris returned HTTP %s. Using local synthetic federation.", response.status_code)
                 return _execute_local_synthetic_sql(query)
         else:
             req_data = json.dumps(payload).encode("utf-8")
@@ -94,29 +121,18 @@ def _execute_local_synthetic_sql(query: str) -> Union[List[Dict[str, Any]], Dict
 
         for table_name, csv_path in csv_files.items():
             if os.path.exists(csv_path):
-                import csv
-                with open(csv_path, "r", encoding="utf-8") as f:
+                with open(csv_path, "r", encoding="utf-8", newline="") as f:
                     reader = csv.reader(f)
                     header = next(reader)
                     placeholders = ",".join(["?"] * len(header))
                     col_defs = ",".join([f'"{col}" TEXT' for col in header])
                     conn.execute(f'CREATE TABLE IF NOT EXISTS "{table_name}" ({col_defs});')
                     for row in reader:
-                        conn.execute(f'INSERT INTO "{table_name}" VALUES ({placeholders});', row)
+                        # Empty cells (e.g. a temperature not measured) become NULL
+                        values = [v if v != "" else None for v in row]
+                        conn.execute(f'INSERT INTO "{table_name}" VALUES ({placeholders});', values)
             else:
-                # Default mock table creation
-                if table_name == "patients":
-                    conn.execute('CREATE TABLE patients (patient_id TEXT, village TEXT, family_history TEXT);')
-                    conn.execute("INSERT INTO patients VALUES ('123', 'Buea', 'True'), ('p101', 'Buea', 'True'), ('p102', 'Limbe', 'False');")
-                elif table_name == "regional_epidemiology":
-                    conn.execute('CREATE TABLE regional_epidemiology (village TEXT, endemic_zone TEXT, active_cases INTEGER);')
-                    conn.execute("INSERT INTO regional_epidemiology VALUES ('Buea', 'High', 42), ('Limbe', 'High', 38);")
-                elif table_name == "clinical_visits":
-                    conn.execute('CREATE TABLE clinical_visits (visit_id TEXT, patient_id TEXT, fever_temp REAL, body_pain TEXT);')
-                    conn.execute("INSERT INTO clinical_visits VALUES ('v101', '123', 39.4, 'True');")
-
-        # Also support patient_id = 123 in patients if querying for patient 123
-        conn.execute("INSERT OR IGNORE INTO patients VALUES ('123', 'Buea', 'True');")
+                logger.warning("Missing synthetic table file: %s", csv_path)
 
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
