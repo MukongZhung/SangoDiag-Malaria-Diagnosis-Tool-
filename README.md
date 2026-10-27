@@ -90,7 +90,7 @@ python -m agent.main --case all --local-data          # live Nightshift, CSV cop
 python -m agent.main --case all --offline --local-data   # rehearsal, no keys needed
 ```
 
-**Five-minute judge path without keys:** `pip install -r requirements.txt && python -m agent.main --case all --offline --local-data && pytest tests/`. Rehearsal mode runs the real loop, rules, critic and H-MEM with a scripted stand-in for the model. Every call it makes is labelled `offline-simulator`, never Nemotron.
+**Five-minute judge path without keys:** `pip install -r requirements.txt && python -m agent.main --case all --offline --local-data && pytest tests/`. Setting `SAMPLE_MODE=true` in `.env` does the same for the CLI, the Streamlit UI and the REST API. Rehearsal mode runs the real loop, rules, critic and H-MEM with a scripted stand-in for the model. Every call it makes is labelled `offline-simulator`, never Nemotron.
 
 ### Demo cases (`examples/demo_cases.json`)
 

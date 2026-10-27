@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from agent import engine_h_mem, llm, tools_zetaris  # noqa: E402
 from agent.agent import Event, demo_cases, run_case  # noqa: E402
-from agent.main import _load_dotenv  # noqa: E402
+from agent.main import _load_dotenv, sample_mode  # noqa: E402
 from agent.triage import DANGER_SIGNS, SYMPTOMS, TEST_RESULTS, Intake  # noqa: E402
 
 _load_dotenv()
@@ -85,9 +85,10 @@ def _status(data_mode: str):
 with st.sidebar:
     st.markdown("### Setup")
     model_choice = st.radio("AI provider", ["Meterless Nightshift (live Nemotron)", "Rehearsal without a model"],
+                            index=1 if sample_mode() else 0,
                             help="Rehearsal runs the same agent with a scripted stand-in. Every result it makes is labelled.")
     model_mode = "live" if model_choice.startswith("Meterless") else "offline"
-    data_choice = st.radio("Data", ["Zetaris (live)", "Local copy of the CSV files"])
+    data_choice = st.radio("Data", ["Zetaris (live)", "Local copy of the CSV files"], index=1 if sample_mode() else 0)
     data_mode = "live" if data_choice.startswith("Zetaris") else "local"
 
     ns, zs = _status(data_mode)

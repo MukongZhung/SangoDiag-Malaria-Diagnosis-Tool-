@@ -35,6 +35,11 @@ def _load_dotenv() -> None:
                 os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
+def sample_mode() -> bool:
+    """SAMPLE_MODE=true runs with no keys: offline simulator + local CSV copy."""
+    return os.environ.get("SAMPLE_MODE", "").strip().lower() in ("1", "true", "yes")
+
+
 def _print_event(e: Event) -> None:
     lane = f" [{e.lane.upper()} LANE]" if e.lane else ""
     mark = {"ok": " ", "warn": "!", "error": "X", "revise": "~"}.get(e.status, " ")
@@ -68,6 +73,9 @@ def main() -> int:
     ap.add_argument("--local-data", action="store_true", help="use the CSV replica instead of live Zetaris")
     ap.add_argument("--json", action="store_true", help="print the full result as JSON")
     args = ap.parse_args()
+    if sample_mode():
+        args.offline, args.local_data = True, True
+        print("SAMPLE_MODE=true: scripted stand-in model and local CSV copy, no Nightshift or Zetaris calls")
 
     if args.status:
         ns = llm.provider_status()
