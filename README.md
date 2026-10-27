@@ -60,7 +60,7 @@ Every run writes a JSONL trace to `logs/run-<id>.jsonl`.
 | Data | **Zetaris** REST: `POST /sql-editor/sqls/run` with a bearer key, `X-Org-ID: 1`, a fresh `X-Request-ID` UUID per request, and body `{queryId, sql, source: "SqlEditor", limit}`. One read-only statement per call, enforced before sending | `agent/tools_zetaris.py` |
 | Vision | Smear model served as an HTTP endpoint (`VISION_ENDPOINT_URL`). A local blur and exposure check runs first. The image model can raise suspicion but never confirms malaria on its own | `agent/tools_vision.py` |
 | UI | Streamlit nurse screen | `app.py` |
-| Coding tools | Cursor, Google AI Studio, Claude Code | |
+| Coding tools | Google AI Studio, Claude Code | |
 
 ### Proof that the engine works
 

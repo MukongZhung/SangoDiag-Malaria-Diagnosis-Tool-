@@ -52,7 +52,7 @@ Every run writes a trace (`logs/run-<id>.jsonl`) with each query, each model cal
 
 ## AI and coding tools
 
-Coding tools: Cursor, Google AI Studio, Claude Code. AI-assisted code was reviewed and tested by the team. The product's own AI calls all go through Meterless Nightshift.
+Coding tools: Google AI Studio, Claude Code. AI-assisted code was reviewed and tested by the team. The product's own AI calls all go through Meterless Nightshift.
 
 ## Honest limits
 
