@@ -2,8 +2,8 @@
 base = "light"
 primaryColor = "#5B3A8E"
 backgroundColor = "#F6F4F9"
-secondaryBackgroundColor = "#EEEAF4"
-textColor = "#221B33"
+secondaryBackgroundColor = "#ECE5F7"
+textColor = "#1E1530"
 
 [browser]
 gatherUsageStats = false

@@ -26,28 +26,52 @@ from agent.main import _load_dotenv, sample_mode  # noqa: E402
 from agent.triage import DANGER_SIGNS, SYMPTOMS, TEST_RESULTS, Intake  # noqa: E402
 
 _load_dotenv()
-st.set_page_config(page_title="SangoDiag", page_icon="🩸", layout="wide")
+DOCS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs")
+st.set_page_config(page_title="SangoDiag", page_icon=os.path.join(DOCS, "logo.png"), layout="wide")
+st.logo(os.path.join(DOCS, "logo-wordmark.png"), size="large")
 
+# One colour per next step, shared with the logo, slides and video
 ACTION_STYLE = {
-    "REFER_URGENT": ("#C0392B", "Danger sign found"),
-    "TREAT_PER_PROTOCOL": ("#2F7A57", "Treat per protocol"),
-    "DO_RDT": ("#B7791F", "Test first"),
+    "REFER_URGENT": ("#D9502F", "Danger sign found"),
+    "TREAT_PER_PROTOCOL": ("#1E9E83", "Treat per protocol"),
+    "DO_RDT": ("#C98A12", "Test first"),
     "SEND_LAB": ("#5B3A8E", "Needs the lab"),
-    "OTHER_CAUSE": ("#4A6A8A", "Look elsewhere"),
+    "OTHER_CAUSE": ("#3F8FD8", "Look elsewhere"),
     "STANDARD_CARE": ("#6B6478", "No malaria signal"),
 }
+
+LOGO_SVG = (
+    '<svg viewBox="0 0 120 120" width="52" height="52" aria-hidden="true">'
+    '<rect width="120" height="120" rx="28" fill="#5B3A8E"/>'
+    '<path d="M60 17C60 17 29 53 29 75a31 31 0 0 0 62 0C91 53 60 17 60 17Z" fill="#fff"/>'
+    '<path d="M45 76l11 11 21-24" fill="none" stroke="#5B3A8E" stroke-width="9" stroke-linecap="round" '
+    'stroke-linejoin="round"/><circle cx="92" cy="27" r="9" fill="#EF6A4C"/></svg>'
+)
 
 st.markdown(
     """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap');
-:root { --ink:#221B33; --paper:#F6F4F9; --giemsa:#5B3A8E; --line:#E3DEEC; --quiet:#6B6478; }
+:root { --ink:#1E1530; --paper:#F6F4F9; --giemsa:#5B3A8E; --line:#DDD5EA; --quiet:#6B6478; --coral:#EF6A4C; }
 html, body, [class*="css"], .stMarkdown, .stTextInput, .stButton button, label, p, li {
   font-family: 'Atkinson Hyperlegible', system-ui, sans-serif !important; }
 .stApp { background: var(--paper); color: var(--ink); }
 h1, h2, h3 { font-family: 'Atkinson Hyperlegible', system-ui, sans-serif !important; color: var(--ink); letter-spacing: -0.01em; }
-.block-container { padding-top: 3.2rem; max-width: 1280px; }
+/* flat look: no Streamlit gradient bar, no deploy button */
+[data-testid="stDecoration"], .stDeployButton, [data-testid="stAppDeployButton"] { display: none !important; }
+header[data-testid="stHeader"] { background: transparent; }
+[data-testid="stSidebar"] { background: #fff; border-right: 1px solid var(--line); }
+.block-container { padding-top: 2.6rem; max-width: 1280px; }
+div.sd-head { display: flex; align-items: center; gap: .9rem; }
 div.sd-title { font-size: 2.3rem; font-weight: 700; line-height: 1.1; margin: 0; }
+div.sd-title span { color: var(--giemsa); }
+.stButton button[kind="primary"], div[data-testid="stFormSubmitButton"] button { border-radius: 10px; font-weight: 700; }
+@media (max-width: 760px) {
+  .block-container { padding: 3.6rem 1rem 2rem; }
+  div.sd-title { font-size: 1.8rem; }
+  div.sd-head svg { width: 40px; height: 40px; }
+  .sd-card .action { font-size: 1.45rem; }
+}
 .sd-sub { color: var(--quiet); font-size: 1.02rem; margin: .25rem 0 1.2rem; max-width: 70ch; }
 .sd-card { border-left: 14px solid var(--band); background: #fff; border-radius: 6px; padding: 1.1rem 1.3rem 1rem;
   box-shadow: 0 1px 0 var(--line); margin-bottom: 1rem; }
@@ -64,7 +88,7 @@ div.sd-title { font-size: 2.3rem; font-weight: 700; line-height: 1.1; margin: 0;
 .sd-bar span { display:block; height:100%; background: var(--giemsa); }
 .sd-note { color: var(--quiet); font-size: .88rem; }
 .sd-step { border-left: 3px solid var(--line); padding: .1rem 0 .55rem .9rem; margin-left: .2rem; }
-.sd-step.revise { border-left-color: #B7791F; } .sd-step.warn { border-left-color: #B7791F; } .sd-step.error { border-left-color: #C0392B; }
+.sd-step.revise { border-left-color: #C98A12; } .sd-step.warn { border-left-color: #C98A12; } .sd-step.error { border-left-color: #D9502F; }
 .sd-step .who { font-weight: 700; } .sd-step .meta { color: var(--quiet); font-size: .86rem; }
 div[data-testid="stForm"] { background:#fff; border: 1px solid var(--line); border-radius: 6px; }
 </style>
@@ -135,7 +159,8 @@ labels = {p["patient_id"]: f"{p['patient_id']} ({p['village']})" for p in patien
 # Page
 # ---------------------------------------------------------------------------
 
-st.markdown('<div class="sd-title">SangoDiag</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="sd-head">{LOGO_SVG}<div class="sd-title">Sango<span>Diag</span></div></div>',
+            unsafe_allow_html=True)
 st.markdown('<p class="sd-sub">Malaria triage support for nurses in rural health posts. It checks the patient record, '
             'the village\'s malaria situation and the last visit, then suggests one next step. '
             'The nurse decides.</p>', unsafe_allow_html=True)

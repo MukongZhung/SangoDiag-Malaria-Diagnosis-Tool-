@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo-wordmark.png" alt="SangoDiag" width="360"></p>
+
 # SangoDiag: malaria triage support for nurses in rural Cameroon
 
 In many rural health posts in Cameroon there is a nurse but no doctor, lab results can take days, and rapid tests are not always in stock. SangoDiag gives that nurse a second opinion in about a minute. It reads the patient's record and the village's malaria situation from **Zetaris**, remembers earlier visits with the **Meterless H-MEM** engine, reasons with **NVIDIA Nemotron through Meterless Nightshift**, and returns one next step: test, treat per protocol, send to the lab, look for another cause, or refer. It shows every query and every model call behind that step.
