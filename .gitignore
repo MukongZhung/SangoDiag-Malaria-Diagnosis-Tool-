@@ -19,3 +19,9 @@ debug.keystore
 debug.keystore.base64
 h_mem.db
 .build-outputs/
+*.db
+logs/
+__pycache__/
+.pytest_cache/
+.env.*
+!.env.example

@@ -1,135 +1,250 @@
-import os
-import uuid
-import logging
-import sqlite3
+"""
+Data layer: Zetaris REST SQL tool (run_sql).
+
+Live mode talks to the local Zetaris platform exactly as the hackathon's Start Here
+lesson describes:
+
+    POST {ZETARIS_BASE_URL}/sql-editor/sqls/run          (default http://localhost:8888/api/v1.0)
+    Authorization: Bearer <ZETARIS_API_KEY>
+    X-Org-ID: 1                                           (local install)
+    X-Request-ID: <fresh UUID per request>
+    body: {"queryId": <UUID>, "sql": <ONE statement>, "source": "SqlEditor", "limit": N}
+
+Rules we follow from Zetaris's AGENTS.md: one Lightning SQL statement per call,
+never print credentials. On top of that, the agent may only read: anything that is
+not a single SELECT / WITH statement is refused before it leaves the process.
+
+Local replica mode loads synthetic_data/*.csv into an in-memory SQLite under the
+same table names, so the same SQL runs offline. Every result says which source
+answered (`source` = "zetaris" or "local-replica"), and nothing falls back from one
+to the other silently.
+
+Table names are configurable because Engineer 2 decides how the S3 files are
+registered in Zetaris (for example `malaria_s3.patients`):
+    ZETARIS_TABLE_PATIENTS, ZETARIS_TABLE_VISITS, ZETARIS_TABLE_EPI
+"""
+
+from __future__ import annotations
+
 import csv
-import json
-from typing import List, Dict, Any, Union
-try:
-    import requests
-except ImportError:
-    requests = None
-import urllib.request
-import urllib.error
+import os
+import re
+import sqlite3
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger("ZetarisTool")
+import requests
 
-# Environment configuration
-ZETARIS_API_KEY = os.environ.get("ZETARIS_API_KEY", "")
-ZETARIS_ORG_ID = os.environ.get("ZETARIS_ORG_ID", "1")
-ZETARIS_BASE_URL = os.environ.get("ZETARIS_BASE_URL", "http://localhost:8888/api/v1.0").rstrip("/")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SYNTHETIC_DIR = os.path.join(BASE_DIR, "synthetic_data")
+MAX_ROWS = 200
 
 
-def run_sql(query: str) -> Union[List[Dict[str, Any]], Dict[str, str]]:
-    """
-    Executes a SQL query against Zetaris Federated Data Platform.
-    
-    1. Sends fresh UUID X-Request-ID and required Zetaris Auth & Org headers.
-    2. Target: POST /sql-editor/sqls/run
-    3. Returns list of row dicts or error message for self-correction.
-    4. Includes local federated fallback to synthetic_data/ for offline/demo execution.
-    """
-    endpoint = f"{ZETARIS_BASE_URL}/sql-editor/sqls/run"
+def table_names() -> Dict[str, str]:
+    return {
+        "patients": os.environ.get("ZETARIS_TABLE_PATIENTS", "patients"),
+        "clinical_visits": os.environ.get("ZETARIS_TABLE_VISITS", "clinical_visits"),
+        "regional_epidemiology": os.environ.get("ZETARIS_TABLE_EPI", "regional_epidemiology"),
+    }
+
+
+SCHEMA_DOC = """\
+{patients}(patient_id, village, family_history)                  -- one row per patient; family_history is 'True'/'False'
+{clinical_visits}(visit_id, patient_id, fever_temp, body_pain)   -- earlier visits; fever_temp in degrees C
+{regional_epidemiology}(village, endemic_zone, active_cases)     -- endemic_zone is High / Medium / Low"""
+
+
+def schema_doc() -> str:
+    return SCHEMA_DOC.format(**table_names())
+
+
+class ZetarisError(RuntimeError):
+    pass
+
+
+class SqlRefused(ZetarisError):
+    pass
+
+
+_FORBIDDEN = re.compile(r"\b(insert|update|delete|drop|alter|create|truncate|merge|grant|revoke|attach|pragma)\b", re.I)
+
+
+def check_read_only(sql: str) -> str:
+    s = (sql or "").strip().rstrip(";").strip()
+    if not s:
+        raise SqlRefused("empty SQL")
+    if ";" in s:
+        raise SqlRefused("one statement per call (Zetaris rule)")
+    if not re.match(r"^(select|with)\b", s, re.I):
+        raise SqlRefused("only SELECT / WITH queries are allowed")
+    if _FORBIDDEN.search(s):
+        raise SqlRefused("write or DDL keyword found; the agent may only read")
+    return s
+
+
+@dataclass
+class SqlResult:
+    sql: str
+    source: str                    # "zetaris" | "local-replica"
+    columns: List[str]
+    rows: List[Dict[str, Any]]
+    latency_ms: int
+    request_id: Optional[str] = None
+    error: Optional[str] = None
+    qid: Optional[str] = None      # set by the agent: Q1, Q2, ...
+    asked_by: str = "planner"      # who wrote the SQL: planner (Nemotron) | baseline (code) | critic
+
+    @property
+    def ok(self) -> bool:
+        return self.error is None
+
+    def for_model(self) -> Dict[str, Any]:
+        if self.error:
+            return {"query_id": self.qid, "error": self.error}
+        return {"query_id": self.qid, "row_count": len(self.rows), "rows": self.rows[:50]}
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {k: v for k, v in self.__dict__.items()}
+
+
+# ---------------------------------------------------------------------------
+# Live Zetaris
+# ---------------------------------------------------------------------------
+
+def _settings():
+    return (
+        os.environ.get("ZETARIS_BASE_URL", "http://localhost:8888/api/v1.0").rstrip("/"),
+        os.environ.get("ZETARIS_API_KEY", "").strip(),
+        os.environ.get("ZETARIS_ORG_ID", "1"),
+    )
+
+
+def _normalise(body: Any) -> tuple[List[str], List[Dict[str, Any]]]:
+    if isinstance(body, list):
+        data, meta = body, None
+    else:
+        data = body.get("data") or []
+        meta = body.get("headers") or body.get("columns") or body.get("columnNames") or body.get("schema")
+    cols: List[str] = []
+    if isinstance(meta, list):
+        cols = [c if isinstance(c, str) else str(c.get("name") or c.get("columnName") or "") for c in meta]
+    if data and isinstance(data[0], dict):
+        cols = cols or list(data[0].keys())
+        return cols, [dict(r) for r in data]
+    if data and isinstance(data[0], list):
+        if not cols:
+            cols = [f"col{i}" for i in range(len(data[0]))]
+        return cols, [dict(zip(cols, r)) for r in data]
+    return cols, []
+
+
+def _run_live(sql: str, limit: int) -> SqlResult:
+    base, key, org = _settings()
+    if not key:
+        raise ZetarisError("ZETARIS_API_KEY is not set (create one in the Zetaris web UI)")
     request_id = str(uuid.uuid4())
+    headers = {"Authorization": f"Bearer {key}", "X-Org-ID": str(org), "X-Request-ID": request_id,
+               "Content-Type": "application/json"}
+    payload = {"queryId": str(uuid.uuid4()), "sql": sql, "source": "SqlEditor", "limit": limit}
+    started = time.perf_counter()
+    last = None
+    for _ in range(2):  # Zetaris runs Spark underneath; one retry on timeout / 5xx
+        try:
+            r = requests.post(f"{base}/sql-editor/sqls/run", headers=headers, json=payload, timeout=60)
+        except requests.Timeout as e:
+            last = f"timeout ({e.__class__.__name__})"
+            continue
+        except requests.RequestException as e:
+            raise ZetarisError(f"Zetaris unreachable at {base} ({type(e).__name__})") from e
+        if r.status_code >= 500:
+            last = f"HTTP {r.status_code}: {r.text[:200]}"
+            headers["X-Request-ID"] = request_id = str(uuid.uuid4())  # fresh UUID per request
+            continue
+        if r.status_code == 401:
+            raise ZetarisError("HTTP 401: Zetaris API key missing, wrong or expired")
+        if r.status_code == 400:
+            raise ZetarisError(f"HTTP 400: {r.text[:300]} (check X-Org-ID and the SQL)")
+        if r.status_code != 200:
+            raise ZetarisError(f"HTTP {r.status_code}: {r.text[:300]}")
+        cols, rows = _normalise(r.json())
+        return SqlResult(sql=sql, source="zetaris", columns=cols, rows=rows,
+                         latency_ms=int((time.perf_counter() - started) * 1000), request_id=request_id)
+    raise ZetarisError(f"Zetaris query failed after a retry: {last}")
 
-    headers = {
-        "Authorization": f"Bearer {ZETARIS_API_KEY}",
-        "X-Org-ID": str(ZETARIS_ORG_ID),
-        "X-Request-ID": request_id,
-        "Content-Type": "application/json"
-    }
 
-    payload = {
-        "sql": query
-    }
+# ---------------------------------------------------------------------------
+# Local replica (same table names, SQLite)
+# ---------------------------------------------------------------------------
 
-    print(f"\n[Zetaris Tool] Executing SQL Query via Request-ID: {request_id}")
-    print(f"[Zetaris Tool] Query: {query}")
+_replica: Optional[sqlite3.Connection] = None
 
-    try:
-        if requests is not None:
-            response = requests.post(endpoint, headers=headers, json=payload, timeout=15)
-            if response.status_code == 200:
-                result = response.json()
-                if isinstance(result, dict) and "data" in result:
-                    return result["data"]
-                elif isinstance(result, list):
-                    return result
-                return [result]
-            else:
-                return _execute_local_synthetic_sql(query)
+
+def _replica_conn() -> sqlite3.Connection:
+    global _replica
+    if _replica is not None:
+        return _replica
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    for logical, qualified in table_names().items():
+        schema, _, table = qualified.rpartition(".")
+        if schema:
+            try:
+                conn.execute(f"ATTACH DATABASE ':memory:' AS \"{schema}\"")
+            except sqlite3.OperationalError:
+                pass  # already attached
+            target = f'"{schema}"."{table}"'
         else:
-            req_data = json.dumps(payload).encode("utf-8")
-            req = urllib.request.Request(endpoint, data=req_data, headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
-                if isinstance(result, dict) and "data" in result:
-                    return result["data"]
-                elif isinstance(result, list):
-                    return result
-                return [result]
-    except Exception as e:
-        logger.info("Zetaris endpoint unavailable (%s). Using local synthetic federation.", e)
-        return _execute_local_synthetic_sql(query)
+            target = f'"{table}"'
+        with open(os.path.join(SYNTHETIC_DIR, f"{logical}.csv"), encoding="utf-8") as f:
+            reader = csv.reader(f)
+            header = next(reader)
+            conn.execute(f"CREATE TABLE {target} ({', '.join(f'{chr(34)}{c}{chr(34)} TEXT' for c in header)})")
+            conn.executemany(f"INSERT INTO {target} VALUES ({','.join('?' * len(header))})", list(reader))
+    _replica = conn
+    return conn
 
 
-def _execute_local_synthetic_sql(query: str) -> Union[List[Dict[str, Any]], Dict[str, str]]:
-    """
-    Executes the SQL query against local synthetic SQLite tables (patients, clinical_visits, regional_epidemiology)
-    to enable full end-to-end functionality even without a live remote Zetaris cluster.
+def _run_replica(sql: str, limit: int) -> SqlResult:
+    started = time.perf_counter()
+    try:
+        cur = _replica_conn().execute(sql)
+    except sqlite3.Error as e:
+        raise ZetarisError(f"SQL error: {e}") from e
+    rows = [dict(r) for r in cur.fetchmany(limit)]
+    cols = [d[0] for d in cur.description or []]
+    return SqlResult(sql=sql, source="local-replica", columns=cols, rows=rows,
+                     latency_ms=int((time.perf_counter() - started) * 1000))
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def run_sql(sql: str, mode: str = "live", limit: int = MAX_ROWS) -> SqlResult:
+    """Run ONE read-only statement. mode = "live" (Zetaris REST) or "local" (CSV replica).
+
+    Errors come back inside the result (error=...) so the planner can read them and
+    fix its SQL on the next turn; they are never replaced by made-up rows.
     """
     try:
-        # Load CSVs from synthetic_data/
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        synthetic_dir = os.path.join(base_dir, "synthetic_data")
-        
-        conn = sqlite3.connect(":memory:")
-        
-        # Ingest CSVs into temporary federated SQLite instance
-        csv_files = {
-            "patients": os.path.join(synthetic_dir, "patients.csv"),
-            "clinical_visits": os.path.join(synthetic_dir, "clinical_visits.csv"),
-            "regional_epidemiology": os.path.join(synthetic_dir, "regional_epidemiology.csv")
-        }
+        clean = check_read_only(sql)
+        return _run_live(clean, limit) if mode == "live" else _run_replica(clean, limit)
+    except ZetarisError as e:
+        return SqlResult(sql=sql, source="zetaris" if mode == "live" else "local-replica",
+                         columns=[], rows=[], latency_ms=0, error=str(e))
 
-        for table_name, csv_path in csv_files.items():
-            if os.path.exists(csv_path):
-                import csv
-                with open(csv_path, "r", encoding="utf-8") as f:
-                    reader = csv.reader(f)
-                    header = next(reader)
-                    placeholders = ",".join(["?"] * len(header))
-                    col_defs = ",".join([f'"{col}" TEXT' for col in header])
-                    conn.execute(f'CREATE TABLE IF NOT EXISTS "{table_name}" ({col_defs});')
-                    for row in reader:
-                        conn.execute(f'INSERT INTO "{table_name}" VALUES ({placeholders});', row)
-            else:
-                # Default mock table creation
-                if table_name == "patients":
-                    conn.execute('CREATE TABLE patients (patient_id TEXT, village TEXT, family_history TEXT);')
-                    conn.execute("INSERT INTO patients VALUES ('123', 'Buea', 'True'), ('p101', 'Buea', 'True'), ('p102', 'Limbe', 'False');")
-                elif table_name == "regional_epidemiology":
-                    conn.execute('CREATE TABLE regional_epidemiology (village TEXT, endemic_zone TEXT, active_cases INTEGER);')
-                    conn.execute("INSERT INTO regional_epidemiology VALUES ('Buea', 'High', 42), ('Limbe', 'High', 38);")
-                elif table_name == "clinical_visits":
-                    conn.execute('CREATE TABLE clinical_visits (visit_id TEXT, patient_id TEXT, fever_temp REAL, body_pain TEXT);')
-                    conn.execute("INSERT INTO clinical_visits VALUES ('v101', '123', 39.4, 'True');")
 
-        # Also support patient_id = 123 in patients if querying for patient 123
-        conn.execute("INSERT OR IGNORE INTO patients VALUES ('123', 'Buea', 'True');")
+def status(mode: str = "live") -> Dict[str, Any]:
+    res = run_sql("SELECT 1 AS one", mode=mode, limit=1)
+    if res.ok:
+        return {"state": "online", "source": res.source}
+    state = "unauthorized" if "401" in (res.error or "") or "API_KEY" in (res.error or "") else "offline"
+    return {"state": state, "source": res.source, "detail": res.error}
 
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute(query)
-        rows = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-        
-        print(f"[Zetaris Local Federation] Query executed successfully. Retrieved {len(rows)} records:")
-        for r in rows:
-            print(f"  -> {r}")
-        return rows
 
-    except Exception as sql_err:
-        error_msg = f"SQL Execution Error: {str(sql_err)}"
-        print(f"[Zetaris Local Federation] {error_msg}")
-        return {"error": error_msg}
+def list_patients(mode: str = "local") -> List[Dict[str, Any]]:
+    t = table_names()
+    res = run_sql(f"SELECT patient_id, village FROM {t['patients']} ORDER BY patient_id", mode=mode)
+    return res.rows if res.ok else []
