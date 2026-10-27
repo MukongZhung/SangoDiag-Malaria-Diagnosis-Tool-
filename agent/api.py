@@ -18,18 +18,25 @@ from typing import List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent.main import _load_dotenv  # noqa: E402
-
-_load_dotenv()
+from contextlib import asynccontextmanager  # noqa: E402
 
 from fastapi import FastAPI  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
 from agent import engine_h_mem, llm, tools_zetaris  # noqa: E402
 from agent.agent import demo_cases, run_case  # noqa: E402
+from agent.main import _load_dotenv  # noqa: E402
 from agent.triage import Intake  # noqa: E402
 
-app = FastAPI(title="SangoDiag API", version="1.0")
+
+@asynccontextmanager
+async def lifespan(_app):
+    # Load .env when the server starts, not at import, so importing the API (e.g. in tests) has no side effects
+    _load_dotenv()
+    yield
+
+
+app = FastAPI(title="SangoDiag API", version="1.0", lifespan=lifespan)
 
 
 def _default_model_mode() -> str:

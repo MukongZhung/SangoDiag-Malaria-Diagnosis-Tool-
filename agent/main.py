@@ -56,6 +56,10 @@ def _print_event(e: Event) -> None:
 
 
 def main() -> int:
+    # Windows consoles default to cp1252; Nemotron output can contain any Unicode character
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     _load_dotenv()
     ap = argparse.ArgumentParser(description="SangoDiag malaria triage agent")
     ap.add_argument("--status", action="store_true", help="check Nightshift and Zetaris, then exit")
