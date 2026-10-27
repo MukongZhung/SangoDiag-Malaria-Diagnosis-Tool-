@@ -1,75 +1,49 @@
 """
-Test Suite: Meterless Engine (H-MEM) Persistent Memory Verification
-==================================================================
-Judges and automated CI can execute:
-    pytest tests/test_engine.py
-
-Verifies:
-1. Engine saves patient clinical intake to SQLite (h_mem.db).
-2. Engine retrieves persisted context across separate calls.
-3. Engine updates existing patient context longitudinally without data loss.
+Clinical H-MEM adapter tests (agent/engine_h_mem.py): the engine as the agent uses it.
+The engine's own spec compliance is in test_engine_conformance.py.
 """
 
 import os
 import sys
-import tempfile
-import sqlite3
-try:
-    import pytest
-except ImportError:
-    pytest = None
 
-# Ensure agent package can be imported
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent.engine_h_mem import save_patient_context, get_patient_context, list_all_memories
+from agent import engine_h_mem as mem  # noqa: E402
+from agent.hmem import HMEM  # noqa: E402
 
 
-def test_h_mem_save_and_retrieve():
-    """Verify that clinical memory is correctly persisted and retrieved."""
-    test_id = "test-patient-qa-001"
-    initial_note = "Patient from Buea with fever 39.1C, diagnosed with uncomplicated P. falciparum."
-
-    # Save context to H-MEM
-    save_patient_context(test_id, initial_note)
-
-    # Retrieve from H-MEM
-    retrieved = get_patient_context(test_id)
-    assert retrieved is not None, "Expected context to be found in H-MEM"
-    assert "Buea" in retrieved
-    assert "P. falciparum" in retrieved
+def _h(tmp_path):
+    return HMEM(db_path=str(tmp_path / "h.db"), actor="test")
 
 
-def test_h_mem_longitudinal_update():
-    """Verify that multiple encounters are merged into a longitudinal record."""
-    test_id = "test-patient-qa-002"
-    first_encounter = "Intake: Tested positive on RDT. Prescribed Artemether-Lumefantrine."
-    followup_encounter = "Followup Day 3: Afebril (36.8C), parasite clearance confirmed, completed course."
-
-    save_patient_context(test_id, first_encounter)
-    save_patient_context(test_id, followup_encounter)
-
-    updated = get_patient_context(test_id)
-    assert updated is not None
-    assert "Intake" in updated
-    assert "Followup Day 3" in updated
-    assert "Artemether-Lumefantrine" in updated
+def test_first_visit_has_no_memory(tmp_path):
+    r = mem.recall("p-new", "fever and chills", hmem=_h(tmp_path))
+    assert r["count"] == 0 and r["context"] == ""
 
 
-def test_h_mem_nonexistent_patient():
-    """Verify that querying an unknown patient safely returns None without throwing."""
-    unknown_id = "non-existent-patient-999999"
-    result = get_patient_context(unknown_id)
-    assert result is None
+def test_encounter_is_recalled_next_visit_across_restart(tmp_path):
+    db = str(tmp_path / "h.db")
+    ids = mem.remember_encounter("p101", "Visit: temperature 39.4 C, RDT positive.",
+                                 "SangoDiag advised 'Treat per national protocol'.", "nemotron", "run-1",
+                                 action="TREAT_PER_PROTOCOL", hmem=HMEM(db_path=db))
+    later = HMEM(db_path=db)  # new process, same device
+    r = mem.recall("p101", "fever again", hmem=later)
+    assert r["count"] == 2 and {i["id"] for i in r["items"]} == set(ids)
+    assert "[MEMORY CONTEXT]" in r["context"] and "RDT positive" in r["context"]
+    rec = next(i for i in r["items"] if i["source"] == "agent:nemotron")
+    assert "rec:TREAT_PER_PROTOCOL" in rec["tags"] and rec["confidence"] == 0.6
 
 
-if __name__ == "__main__":
-    print("\n[RUNNING H-MEM PERSISTENT MEMORY ENGINE TESTS]")
-    test_h_mem_save_and_retrieve()
-    print("  ✓ test_h_mem_save_and_retrieve PASSED")
-    test_h_mem_longitudinal_update()
-    print("  ✓ test_h_mem_longitudinal_update PASSED")
-    test_h_mem_nonexistent_patient()
-    print("  ✓ test_h_mem_nonexistent_patient PASSED")
-    print("[ALL H-MEM ENGINE TESTS PASSED SUCCESSFULLY!]\n")
+def test_memories_never_cross_patients(tmp_path):
+    h = _h(tmp_path)
+    mem.remember_encounter("A", "Visit: RDT positive.", "advised treat", "m", "r1", hmem=h)
+    assert mem.recall("B", "RDT positive", hmem=h)["count"] == 0
 
+
+def test_nurse_feedback_updates_confidence_and_is_audited(tmp_path):
+    h = _h(tmp_path)
+    _, rec = mem.remember_encounter("A", "Visit.", "advised RDT", "m", "r1", hmem=h)
+    out = mem.feedback(rec, "wrong", hmem=h)
+    assert out["confidence"] == 0.4 and "review" in out["tags"]
+    actions = [e["action"] for e in mem.patient_ledger("A", hmem=h)]
+    assert actions.count("create") == 2 and "feedback" in actions

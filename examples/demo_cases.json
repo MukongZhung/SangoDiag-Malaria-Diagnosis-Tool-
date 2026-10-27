@@ -1,0 +1,74 @@
+{
+  "clear_malaria": {
+    "label": "1. Clear malaria (Ebolowa, RDT positive)",
+    "story": "Adult from Ebolowa, 2 days of fever with chills. The RDT came back positive.",
+    "intake": {
+      "patient_id": "b2d4f6a8-3c5e-4d7f-9a21-2b3c4d5e6f02",
+      "temperature_c": 39.1,
+      "fever_days": 2,
+      "age_years": 27,
+      "symptoms": ["fever", "chills", "headache", "body_pain"],
+      "danger_signs": [],
+      "household_cases": true,
+      "test_result": "rdt_positive"
+    },
+    "expected_action": "TREAT_PER_PROTOCOL"
+  },
+  "ambiguous": {
+    "label": "2. Suspected malaria, no test yet (Buea)",
+    "story": "Fever for 3 days with headache. No RDT done yet.",
+    "intake": {
+      "patient_id": "e5a7c9d1-6f8b-4a0c-8354-5e6f7a8b9c05",
+      "temperature_c": 38.9,
+      "fever_days": 3,
+      "age_years": 41,
+      "symptoms": ["fever", "headache", "body_pain"],
+      "danger_signs": [],
+      "test_result": "not_done"
+    },
+    "expected_action": "DO_RDT"
+  },
+  "not_malaria": {
+    "label": "3. Probably not malaria (Bafoussam, RDT negative, cough)",
+    "story": "Mild fever and cough for 2 days. RDT negative.",
+    "intake": {
+      "patient_id": "f6b8d0e2-7a9c-4b1d-9465-6f7a8b9c0d06",
+      "temperature_c": 37.8,
+      "fever_days": 2,
+      "age_years": 23,
+      "symptoms": ["fever", "cough"],
+      "danger_signs": [],
+      "test_result": "rdt_negative"
+    },
+    "expected_action": "OTHER_CAUSE"
+  },
+  "danger_signs": {
+    "label": "4. Danger signs (Garoua, child, vomiting everything)",
+    "story": "Child of 3 with high fever who vomits everything and is very drowsy.",
+    "intake": {
+      "patient_id": "c9e1a3b5-0d2f-4e4a-8798-9c0d1e2f3a09",
+      "temperature_c": 39.8,
+      "fever_days": 2,
+      "age_years": 3,
+      "symptoms": ["fever", "vomiting"],
+      "danger_signs": ["vomits_everything", "impaired_consciousness"],
+      "test_result": "not_done"
+    },
+    "expected_action": "REFER_URGENT"
+  },
+  "follow_up": {
+    "label": "5. Fever is back after treatment (Ebolowa, run case 1 first)",
+    "story": "Same Ebolowa patient, fever again a few days after being treated. H-MEM remembers the treatment.",
+    "intake": {
+      "patient_id": "b2d4f6a8-3c5e-4d7f-9a21-2b3c4d5e6f02",
+      "temperature_c": 38.7,
+      "fever_days": 1,
+      "age_years": 27,
+      "symptoms": ["fever", "chills"],
+      "danger_signs": [],
+      "test_result": "not_done"
+    },
+    "expected_action": "SEND_LAB",
+    "needs": "clear_malaria"
+  }
+}

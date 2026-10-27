@@ -1,45 +1,37 @@
-"""
-Test Suite: REST API used by the Android field app (offline mode)
-"""
+"""REST API used by the Android field app: offline simulator + local CSV replica, no keys needed."""
 
 import os
-import sys
+import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+import pytest
 from fastapi.testclient import TestClient
 
-from agent.api import app
-
-client = TestClient(app)
+from agent import api
 
 
-def test_health_reports_offline_mode():
-    body = client.get("/health").json()
-    assert body["status"] == "ok"
-    assert body["nightshift"] == "offline-rules"
+@pytest.fixture
+def client(monkeypatch):
+    monkeypatch.setenv("SANGODIAG_MODEL_MODE", "offline")
+    monkeypatch.setenv("SANGODIAG_DATA_MODE", "local")
+    monkeypatch.setenv("SANGODIAG_LOG_DIR", tempfile.mkdtemp())
+    monkeypatch.setattr(api.engine_h_mem, "DB_PATH", os.path.join(tempfile.mkdtemp(), "hmem.db"))
+    monkeypatch.setattr(api.engine_h_mem, "_engine", None)
+    return TestClient(api.app)
 
 
-def test_diagnose_returns_structured_result():
-    resp = client.post("/diagnose", json={
-        "patient_id": "b2d4f6a8-3c5e-4d7f-9a21-2b3c4d5e6f02",
-        "symptoms": "Fever (39.8°C), chills",
-        "image_result": "RDT HRP2 positive",
-        "weight_kg": 30,
-    })
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["assessment"]["village"] == "Ebolowa"
-    assert body["assessment"]["recent_travel"] is True
-    assert body["assessment"]["coartem_tablets_per_dose"] == 3
-    assert body["sql_queries"]
-    assert body["llm_calls"][0]["mode"] == "offline-rules"
-    assert client.get("/memory/b2d4f6a8-3c5e-4d7f-9a21-2b3c4d5e6f02").json()["context"]
+def test_patients_come_from_the_hackathon_csv(client):
+    villages = {p["village"] for p in client.get("/patients").json()}
+    assert {"Ebolowa", "Garoua", "Bafoussam"} <= villages
 
 
-def test_diagnose_validates_input():
-    assert client.post("/diagnose", json={"patient_id": "x"}).status_code == 422
+def test_diagnose_runs_the_agent(client):
+    case = client.get("/demo-cases").json()["danger_signs"]
+    body = client.post("/diagnose", json=case["intake"]).json()
+    assert body["error"] is None
+    assert body["triage"]["action"] == case["expected_action"]
+    assert body["queries"] and all(q["source"] == "local-replica" for q in body["queries"])
+    assert all(c["model_reported"] == "offline-simulator" for c in body["calls"])
 
 
-def test_sql_error_is_400():
-    assert client.post("/sql", json={"query": "SELECT * FROM nope"}).status_code == 400
+def test_diagnose_validates_input(client):
+    assert client.post("/diagnose", json={"patient_id": "x", "temperature_c": 99}).status_code == 422

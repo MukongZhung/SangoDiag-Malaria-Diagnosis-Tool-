@@ -7,72 +7,86 @@ import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import retrofit2.http.Body
-import retrofit2.http.GET
 import retrofit2.http.POST
 import java.util.concurrent.TimeUnit
 
-// Mirrors the Python API in agent/api.py
+// Mirrors agent/api.py, which runs agent.agent.run_case (same agent as the Streamlit UI)
 
 data class DiagnoseRequest(
     @Json(name = "patient_id") val patientId: String,
-    val symptoms: String,
-    @Json(name = "image_result") val imageResult: String,
-    @Json(name = "weight_kg") val weightKg: Double? = null
+    @Json(name = "temperature_c") val temperatureC: Double? = null,
+    @Json(name = "fever_days") val feverDays: Int? = null,
+    @Json(name = "age_years") val ageYears: Double? = null,
+    val symptoms: List<String> = emptyList(),
+    @Json(name = "danger_signs") val dangerSigns: List<String> = emptyList(),
+    @Json(name = "recent_travel") val recentTravel: Boolean = false,
+    @Json(name = "household_cases") val householdCases: Boolean = false,
+    @Json(name = "test_result") val testResult: String = "not_done"
 )
 
-data class AssessmentDto(
-    val diagnosis: String,
-    val treatment: String,
-    @Json(name = "test_result") val testResult: String,
-    val temperature: Double?,
-    @Json(name = "severe_signs") val severeSigns: List<String> = emptyList(),
-    @Json(name = "is_severe") val isSevere: Boolean,
-    val village: String?,
-    @Json(name = "endemic_zone") val endemicZone: String?,
-    @Json(name = "active_cases") val activeCases: String?,
-    @Json(name = "coartem_tablets_per_dose") val coartemTabletsPerDose: Int?
+data class TriageDto(
+    val score: Int,
+    val level: String,
+    val action: String,
+    @Json(name = "action_label") val actionLabel: String,
+    val urgent: Boolean,
+    val confidence: String,
+    val abstain: Boolean,
+    @Json(name = "next_steps") val nextSteps: List<String> = emptyList(),
+    val missing: List<String> = emptyList()
 )
 
-data class LlmCallDto(
-    val mode: String,
-    @Json(name = "executed_model") val executedModel: String?,
-    @Json(name = "routing_lane") val routingLane: String?,
+data class QueryDto(
+    val qid: String?,
+    val sql: String,
+    val source: String,
+    val rows: List<Map<String, Any?>> = emptyList(),
+    val error: String?,
+    @Json(name = "asked_by") val askedBy: String?
+)
+
+data class CallDto(
+    val lane: String,
+    val role: String,
+    @Json(name = "model_reported") val modelReported: String,
+    val live: Boolean,
     @Json(name = "latency_ms") val latencyMs: Long
 )
 
-data class DiagnoseResponse(
-    @Json(name = "patient_id") val patientId: String,
-    val report: String,
-    @Json(name = "safety_alert") val safetyAlert: String?,
-    val assessment: AssessmentDto,
-    @Json(name = "sql_queries") val sqlQueries: List<String> = emptyList(),
-    @Json(name = "sql_rows") val sqlRows: List<Map<String, Any?>> = emptyList(),
-    @Json(name = "memory_before") val memoryBefore: String?,
-    @Json(name = "memory_saved_note") val memorySavedNote: String,
-    @Json(name = "llm_calls") val llmCalls: List<LlmCallDto> = emptyList()
+data class MemoryItemDto(
+    val content: String,
+    @Json(name = "when") val `when`: String?
 )
 
-data class HealthResponse(
-    val status: String,
-    val nightshift: String,
-    val zetaris: String,
-    val model: String
+data class MemoryDto(
+    val count: Int = 0,
+    val items: List<MemoryItemDto> = emptyList()
+)
+
+data class RunResultDto(
+    @Json(name = "run_id") val runId: String,
+    val triage: TriageDto?,
+    val report: String = "",
+    @Json(name = "report_source") val reportSource: String = "",
+    val queries: List<QueryDto> = emptyList(),
+    val calls: List<CallDto> = emptyList(),
+    val memory: MemoryDto = MemoryDto(),
+    @Json(name = "memory_written") val memoryWritten: List<String> = emptyList(),
+    val error: String?,
+    @Json(name = "elapsed_s") val elapsedS: Double = 0.0
 )
 
 interface AgentApi {
-    @GET("health")
-    suspend fun health(): HealthResponse
-
     @POST("diagnose")
-    suspend fun diagnose(@Body request: DiagnoseRequest): DiagnoseResponse
+    suspend fun diagnose(@Body request: DiagnoseRequest): RunResultDto
 
     companion object {
         fun create(baseUrl: String): AgentApi {
             val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
             val client = OkHttpClient.Builder()
                 .connectTimeout(5, TimeUnit.SECONDS)
-                // Nightshift turns can take a while on a slow uplink
-                .readTimeout(120, TimeUnit.SECONDS)
+                // Planner + reporter turns on Nightshift can take minutes (meterless-ttfb-ms is 240 s)
+                .readTimeout(300, TimeUnit.SECONDS)
                 .build()
             return Retrofit.Builder()
                 .baseUrl(if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/")

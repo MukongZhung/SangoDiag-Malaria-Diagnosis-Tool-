@@ -186,111 +186,107 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun buildSymptomsText(sym: SymptomsState): String {
-        val signs = listOfNotNull(
+    private fun buildRequest(p: Patient, sym: SymptomsState, rdt: RdtStatus): DiagnoseRequest {
+        val symptoms = listOfNotNull(
+            "fever".takeIf { sym.feverTemp >= 37.5f },
             "headache".takeIf { sym.headache },
-            "body pain".takeIf { sym.bodyPain },
+            "body_pain".takeIf { sym.bodyPain },
             "chills".takeIf { sym.chills },
             "vomiting".takeIf { sym.vomiting }
         )
-        return "Fever (${sym.feverTemp}°C)" +
-                (if (signs.isNotEmpty()) ", ${signs.joinToString(", ")}" else "") +
-                " for ${sym.durationDays} days"
+        val test = when {
+            !rdt.hasControlLine -> "inconclusive"
+            rdt.isPositive -> "rdt_positive"
+            else -> "rdt_negative"
+        }
+        return DiagnoseRequest(
+            patientId = p.patientId,
+            temperatureC = sym.feverTemp.toDouble(),
+            feverDays = sym.durationDays,
+            ageYears = p.age.toDouble(),
+            symptoms = symptoms,
+            recentTravel = p.recentTravel,
+            testResult = test
+        )
     }
-
-    private fun buildTestText(rdt: RdtStatus): String =
-        "RDT Cassette: ${rdt.antigen} line ${if (rdt.isPositive) "positive" else "negative"}" +
-                (if (rdt.hasControlLine) ", control line valid" else ", control line missing (invalid test)")
 
     /** Returns null on success, or the reason the backend could not be used. */
     private suspend fun runBackendDiagnosis(): String? {
         val p = _selectedPatient.value
         val steps = mutableListOf(
-            AgentExecutionStep(1, "H-MEM", "Memory Retrieval (H-MEM Engine)", StepStatus.RUNNING,
-                "Backend: reading persistent memory for ${p.patientId}..."),
-            AgentExecutionStep(2, "ZETARIS", "Federated SQL Tool Call", StepStatus.RUNNING,
-                "Backend: querying patient record & village epidemiology..."),
-            AgentExecutionStep(3, "NIGHTSHIFT", "NVIDIA Nemotron Reasoning", StepStatus.RUNNING,
-                "Backend: running the agent loop..."),
+            AgentExecutionStep(1, "H-MEM", "Memory Recall (H-MEM Engine)", StepStatus.RUNNING,
+                "Backend: ranking what H-MEM remembers about ${p.patientId}..."),
+            AgentExecutionStep(2, "ZETARIS", "Planner SQL on Zetaris", StepStatus.RUNNING,
+                "Backend: planner (fast lane) fetching record & village epidemiology..."),
+            AgentExecutionStep(3, "NIGHTSHIFT", "Rules + Nemotron Report", StepStatus.RUNNING,
+                "Backend: triage rules, then reporter (deep lane) checked by the critic..."),
             AgentExecutionStep(4, "H-MEM-SAVE", "Persistent Memory Commit", StepStatus.PENDING,
-                "Waiting for diagnosis...")
+                "Waiting for the decision...")
         )
         _executionSteps.value = steps.toList()
 
-        val started = System.currentTimeMillis()
         val resp = try {
-            AgentApi.create(_agentBaseUrl.value).diagnose(
-                DiagnoseRequest(
-                    patientId = p.patientId,
-                    symptoms = buildSymptomsText(_symptoms.value),
-                    imageResult = buildTestText(_rdtStatus.value)
-                )
-            )
+            AgentApi.create(_agentBaseUrl.value).diagnose(buildRequest(p, _symptoms.value, _rdtStatus.value))
         } catch (e: Exception) {
             return "Backend ${_agentBaseUrl.value} unreachable (${e.javaClass.simpleName}: ${e.message})"
         }
-        val elapsed = System.currentTimeMillis() - started
+        val tr = resp.triage
+        if (resp.error != null || tr == null) {
+            return "Backend run stopped: ${resp.error ?: "no triage result"}"
+        }
 
-        val a = resp.assessment
-        val lastCall = resp.llmCalls.lastOrNull()
-        val online = resp.llmCalls.any { it.mode == "nightshift" }
+        val lastCall = resp.calls.lastOrNull()
+        val online = resp.calls.any { it.live }
         val audit = NightshiftAudit(
             targetModel = _meterlessModel.value,
-            executedModel = lastCall?.executedModel ?: "not reported",
-            routingLane = lastCall?.routingLane ?: "not reported",
-            latencyMs = elapsed,
-            mode = if (online) "Nightshift" else "Backend offline rules"
+            executedModel = lastCall?.modelReported ?: "not reported",
+            routingLane = lastCall?.lane ?: "n/a",
+            latencyMs = (resp.elapsedS * 1000).toLong(),
+            mode = if (online) "Nightshift" else "Offline simulator"
         )
 
+        val recalled = resp.memory.items.joinToString("\n") { "[${it.`when`}] ${it.content}" }
         steps[0] = steps[0].copy(
             status = StepStatus.SUCCESS,
-            subtitle = if (resp.memoryBefore != null) "Prior sessions found" else "No prior session (new intake)",
-            details = "H-MEM Retrieved Context:\n${resp.memoryBefore ?: "None"}"
+            subtitle = if (resp.memory.count > 0) "${resp.memory.count} memory item(s) recalled" else "No prior memory (new patient)",
+            details = "H-MEM Recalled:\n${recalled.ifEmpty { "None" }}"
         )
         steps[1] = steps[1].copy(
             status = StepStatus.SUCCESS,
-            subtitle = "${resp.sqlQueries.size} query(ies), ${resp.sqlRows.size} row(s) returned",
-            details = resp.sqlQueries.joinToString("\n\n")
+            subtitle = "${resp.queries.size} query(ies) · ${resp.queries.sumOf { it.rows.size }} row(s)",
+            details = resp.queries.joinToString("\n\n") { "[${it.qid ?: "Q?"}] (${it.askedBy ?: "?"}, ${it.source}) ${it.sql}" }
         )
         steps[2] = steps[2].copy(
             status = StepStatus.SUCCESS,
-            subtitle = "${resp.llmCalls.size} turn(s) · ${audit.mode}",
-            details = resp.llmCalls.joinToString("\n") {
-                "Turn: ${it.mode} | model=${it.executedModel ?: "?"} | ${it.latencyMs}ms"
-            }
+            subtitle = "${tr.actionLabel} · score ${tr.score}/100 · ${audit.mode}",
+            details = resp.calls.joinToString("\n") { "${it.role} [${it.lane}] model=${it.modelReported} ${it.latencyMs}ms" }
         )
         steps[3] = steps[3].copy(
             status = StepStatus.SUCCESS,
-            subtitle = "Encounter note saved to H-MEM",
-            details = "Saved Context Delta:\n${resp.memorySavedNote}"
+            subtitle = "${resp.memoryWritten.size} record(s) saved to H-MEM",
+            details = "Report source: ${resp.reportSource}"
         )
         _executionSteps.value = steps.toList()
 
-        // Mirror the note locally so the H-MEM screen reflects the backend session
-        saveHMemContext(p.patientId, resp.memorySavedNote)
+        // Mirror the decision locally so the H-MEM screen reflects the backend session
+        val note = "${tr.actionLabel} (malaria score ${tr.score}/100, confidence ${tr.confidence})"
+        saveHMemContext(p.patientId, note)
 
-        val prescription = a.coartemTabletsPerDose?.let { "${a.treatment} - $it tablet(s) per dose" } ?: a.treatment
-        val temp = a.temperature
+        val rdt = _rdtStatus.value
         _finalDiagnosis.value = DiagnosisResult(
-            patientId = resp.patientId,
-            badgeLabel = when {
-                a.isSevere -> "SEVERE malaria"
-                a.testResult == "positive" -> "P. falciparum (+)"
-                a.testResult == "negative" -> "Malaria (-)"
-                else -> "Not confirmed"
-            },
-            testPositive = a.testResult == "positive",
-            isSevere = a.isSevere,
-            clinicalSummary = resp.report.replace("**", "").replace("### ", ""),
-            prescriptionAct = prescription,
-            supportiveCare = if (temp != null && temp > 38.5 && !a.isSevere)
-                "Paracetamol 15 mg/kg (adult 1 g) every 6 hours; oral rehydration salts (ORS)."
-            else "Clinical monitoring; follow the referral plan if danger signs appear.",
-            dangerSigns = if (a.severeSigns.isNotEmpty()) a.severeSigns.map { "DETECTED: $it" } else STANDARD_DANGER_SIGNS,
-            sqlQuery = resp.sqlQueries.lastOrNull() ?: "",
-            sqlRowsReturned = resp.sqlRows.size,
-            hMemBefore = resp.memoryBefore,
-            hMemSavedNote = resp.memorySavedNote,
+            patientId = p.patientId,
+            badgeLabel = tr.actionLabel,
+            testPositive = rdt.hasControlLine && rdt.isPositive,
+            isSevere = tr.urgent,
+            clinicalSummary = resp.report.replace("**", "").ifEmpty { tr.nextSteps.joinToString("\n") },
+            prescriptionAct = "${tr.actionLabel} (score ${tr.score}/100, ${tr.level}, confidence ${tr.confidence})" +
+                    (if (tr.abstain) " - evidence too thin, decision withheld" else ""),
+            supportiveCare = tr.nextSteps.joinToString(" ").ifEmpty { "Follow the national protocol chart." },
+            dangerSigns = if (tr.urgent) listOf("DANGER SIGN PRESENT: refer urgently") + STANDARD_DANGER_SIGNS else STANDARD_DANGER_SIGNS,
+            sqlQuery = resp.queries.lastOrNull()?.sql ?: "",
+            sqlRowsReturned = resp.queries.sumOf { it.rows.size },
+            hMemBefore = recalled.ifEmpty { null },
+            hMemSavedNote = note,
             audit = audit
         )
         return null
@@ -419,7 +415,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             val actPrescription = if (rdt.isPositive) {
-                "Artemether 20mg / Lumefantrine 120mg (Coartem) - 4 tablets stat at hour 0, 4 tablets at 8 hours, then 4 tablets BID on Days 2 & 3 (total 24 tablets)."
+                "Treat per national protocol (first-line ACT). Doses: national protocol chart."
             } else {
                 "Antimalarials withholding advised. Re-evaluate with repeat blood film if fever persists past 24 hours."
             }
@@ -431,7 +427,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isSevere = false,
                 clinicalSummary = summary,
                 prescriptionAct = actPrescription,
-                supportiveCare = "Paracetamol 1000mg PO TDS for 48h for fever (${sym.feverTemp}°C); Oral Rehydration Salts (ORS) for fluid loss.",
+                supportiveCare = "Antipyretic and fluids per national protocol for fever (${sym.feverTemp}°C).",
                 dangerSigns = STANDARD_DANGER_SIGNS,
                 sqlQuery = sqlQuery,
                 sqlRowsReturned = rows.size,
