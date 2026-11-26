@@ -1,0 +1,59 @@
+# Tests the SangoDiag field app and publishes mobile-app/ to GitHub Pages.
+# One-time setup: repository Settings > Pages > Source: "GitHub Actions".
+name: Field app (PWA)
+
+on:
+  push:
+    branches: [main]
+    paths: ["mobile-app/**", "agent/triage.py", "synthetic_data/**", "examples/**", ".github/workflows/field-app.yml"]
+  pull_request:
+    paths: ["mobile-app/**", "agent/triage.py", "synthetic_data/**", "examples/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: field-app-pages
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Bundle the register data
+        run: python mobile-app/scripts/build_data.py
+      - name: Phone rules match agent/triage.py
+        run: python mobile-app/tests/make_fixtures.py && cd mobile-app && npm test
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Build data and icons
+        run: |
+          python mobile-app/scripts/build_data.py
+          sudo apt-get update -qq && sudo apt-get install -y -qq librsvg2-bin
+          cd mobile-app/icons
+          rsvg-convert -w 192 -h 192 logo.svg -o icon-192.png
+          rsvg-convert -w 512 -h 512 logo.svg -o icon-512.png
+          rsvg-convert -w 512 -h 512 maskable.svg -o maskable-512.png
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: mobile-app }
+      - id: pages
+        uses: actions/deploy-pages@v4
