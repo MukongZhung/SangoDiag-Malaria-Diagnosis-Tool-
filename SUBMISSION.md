@@ -8,7 +8,8 @@
 | One-line pitch | A second opinion on malaria for the nurse who works alone in a rural Cameroonian health post. |
 | Track | Solving Fragmented Intelligence |
 | Team | Biotek-Nexus CM: Mukong Peter Zhung, Yosr Takouti, Tiomela Zangue Jorel, Joram Kirubi, Roniald Nchare Njutap |
-| Repository | https://github.com/MukongZhung/SangoDiag-Malaria-Diagnosis-Tool- |
+| Repository | https://github.com/MukongZhung/SangoDiag |
+| Field app (offline, installable) | https://mukongzhung.github.io/SangoDiag/ |
 | Demo video | SangoDiag_demo_v2.mp4 (3 min 08, 1080p) |
 | Slide deck | SangoDiag_deck.pdf / SangoDiag_deck.pptx (14 slides) |
 

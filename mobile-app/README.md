@@ -2,6 +2,8 @@
 
 **One Screen, One Next Step.** The SangoDiag nurse screen as an installable, offline-first app for Android phones.
 
+**Open it: https://mukongzhung.github.io/SangoDiag/**
+
 A nurse opens it in Chrome once, taps *Install*, and from then on it opens from the home screen and works with no network at all. She enters temperature, symptoms, danger signs and the test result, and gets one next step with its reasons. The phone remembers each visit, so when a treated patient comes back with fever, it changes the advice to "Send for microscopy / clinician review".
 
 It supports the nurse's decision. It does not replace a test or a doctor, and it never gives a drug dose.
@@ -69,8 +71,10 @@ The full offline flow (setup, PIN, register, two visits, memory, wrong PIN, CSV,
 **GitHub Pages, for the pilot (recommended).**
 1. Merge this branch into `main`.
 2. On GitHub: *Settings > Pages > Source: GitHub Actions*.
-3. The workflow `.github/workflows/field-app.yml` runs the tests and publishes this folder to `https://mukongzhung.github.io/SangoDiag-Malaria-Diagnosis-Tool-/`.
-4. Send that link to the nurses. In Chrome: open it, wait for the page to load, then menu > *Install app* (or *Add to Home screen*). From then on it works offline.
+3. The workflow `.github/workflows/field-app.yml` runs the tests and publishes this folder to `https://mukongzhung.github.io/SangoDiag/`.
+4. Send that link to the nurses. In Chrome: open it, wait for the page to load, then menu > *Install app* (or *Add to Home screen*). From then on it works offline. Open it in Chrome itself, not inside WhatsApp or Gmail: in-app browsers cannot install it.
+
+The repository used to be called `SangoDiag-Malaria-Diagnosis-Tool-`. Its old Pages address ended in a dash that messaging apps drop when they make a link, which sent nurses to a 404 page, so it was renamed. Old links to the app no longer work; share the address above.
 
 ## Connect it to the SangoDiag server (optional)
 
@@ -88,7 +92,7 @@ A page served over HTTPS (GitHub Pages) can only call an HTTPS server. Put the A
 The PWA can be wrapped as a Trusted Web Activity, a real Android app that opens this same site full-screen:
 
 1. Deploy to GitHub Pages (above).
-2. Go to [pwabuilder.com](https://www.pwabuilder.com), enter the Pages address, choose *Android* > *Generate*. Or with Node: `npx @bubblewrap/cli init --manifest https://<pages-address>/manifest.webmanifest` then `npx @bubblewrap/cli build`.
+2. Go to [pwabuilder.com](https://www.pwabuilder.com), enter the Pages address, choose *Android* > *Generate*. Or with Node: `npx @bubblewrap/cli init --manifest https://mukongzhung.github.io/SangoDiag/manifest.webmanifest` then `npx @bubblewrap/cli build`.
 3. Keep the signing key safe and out of git (`*.keystore` and `*.jks` are ignored).
 4. Publish the `assetlinks.json` it gives you at `/.well-known/assetlinks.json` on the site so Android hides the browser bar.
 5. Upload the `.aab` to Play Console *Internal testing*, then *Closed testing* with 20 testers for 14 days.
