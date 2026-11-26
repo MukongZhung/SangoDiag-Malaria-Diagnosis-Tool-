@@ -1,0 +1,12 @@
+{
+  "name": "sangodiag-field-app",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "SangoDiag offline-first field app (PWA) for nurses in rural Cameroon. One Screen, One Next Step.",
+  "scripts": {
+    "fixtures": "python3 tests/make_fixtures.py",
+    "test": "python3 tests/make_fixtures.py && node --test tests/*.test.mjs",
+    "serve": "python3 scripts/build_data.py && python3 -m http.server 8080"
+  }
+}

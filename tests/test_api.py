@@ -35,3 +35,13 @@ def test_diagnose_runs_the_agent(client):
 
 def test_diagnose_validates_input(client):
     assert client.post("/diagnose", json={"patient_id": "x", "temperature_c": 99}).status_code == 422
+
+
+def test_cors_lets_the_field_app_call_the_api():
+    from fastapi.testclient import TestClient
+    from agent.api import app
+    r = TestClient(app).options("/diagnose", headers={
+        "Origin": "https://mukongzhung.github.io", "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type"})
+    assert r.status_code == 200
+    assert r.headers.get("access-control-allow-origin") in ("*", "https://mukongzhung.github.io")

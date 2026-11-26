@@ -25,3 +25,14 @@ __pycache__/
 .pytest_cache/
 .env.*
 !.env.example
+
+# Field app
+node_modules/
+*.keystore
+*.jks
+mobile-app/android/
+mobile-app/tests/fixtures.json
+
+# Built by mobile-app/scripts/build_data.py and the Pages workflow
+mobile-app/js/data.js
+mobile-app/icons/*.png

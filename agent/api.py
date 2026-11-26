@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from contextlib import asynccontextmanager  # noqa: E402
 
 from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
 from agent import engine_h_mem, llm, tools_zetaris  # noqa: E402
@@ -37,6 +38,16 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="SangoDiag API", version="1.0", lifespan=lifespan)
+
+# The field app (mobile-app/, a PWA) runs from another origin, e.g. GitHub Pages, and calls this API
+# from the nurse's browser. List the allowed origins in SANGODIAG_CORS_ORIGINS (comma separated).
+# Default "*" suits a pilot on synthetic data; set the real app URL before using real patients.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in os.environ.get("SANGODIAG_CORS_ORIGINS", "*").split(",") if o.strip()],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
 
 
 def _default_model_mode() -> str:
