@@ -16,6 +16,9 @@ export const FEEDBACK_DELTAS = { helpful: 0.05, not_helpful: -0.03, wrong: -0.2 
 const YEAR_MS = 365.25 * 24 * 3600 * 1000;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const round2 = (x) => Math.round(x * 100) / 100;
+const pad2 = (n) => String(n).padStart(2, "0");
+/** YYYY-MM-DD in the phone's own time zone (toISOString would give the UTC date: wrong between 00:00 and 01:00 in Cameroon). */
+export const localDate = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
 
 /* ---------- health post ---------- */
 
@@ -156,7 +159,7 @@ export function evidenceRows(p) {
     out.push({ qid: "Q2", source: "villages", rows: [{ village: vil.name, endemic_zone: vil.zone, active_cases_this_week: vil.cases }] });
   }
   const prior = visitsFor(p.id).map((v) => ({ visit_id: v.id, patient_id: p.id,
-    visit_date: new Date(v.at).toISOString().slice(0, 10), fever_temp_c: v.intake.temperature_c }));
+    visit_date: localDate(v.at), fever_temp_c: v.intake.temperature_c }));
   if (prior.length) out.push({ qid: "Q3", source: "visits", rows: prior });
   return out;
 }
@@ -172,7 +175,8 @@ export const unqueue = (id) => store.remove("outbox", id);
 export async function loadDemo() {
   const byName = {};
   for (const r of BUNDLE.epidemiology) {
-    const v = await saveVillage({ name: r.village, zone: r.endemic_zone.toLowerCase(), cases: r.active_cases_this_week, demo: true });
+    // Reuse a village the nurse already registered under the same name instead of adding a duplicate.
+    const v = villageByName(r.village) || await saveVillage({ name: r.village, zone: r.endemic_zone.toLowerCase(), cases: r.active_cases_this_week, demo: true });
     byName[r.village] = v.id;
   }
   for (const r of BUNDLE.patients) {
@@ -185,9 +189,15 @@ export async function loadDemo() {
 
 export async function removeDemo() {
   const demoPatients = new Set(patients().filter((p) => p.demo).map((p) => p.id));
+  const removedMemory = new Set();
   for (const kind of ["visit", "memory", "outbox"]) {
-    for (const r of store.all(kind)) if (demoPatients.has(r.patientId || (r.intake && r.intake.patient_id))) await store.remove(kind, r.id);
+    for (const r of store.all(kind)) {
+      if (!demoPatients.has(r.patientId || (r.intake && r.intake.patient_id))) continue;
+      if (kind === "memory") removedMemory.add(r.id);
+      await store.remove(kind, r.id);
+    }
   }
+  for (const l of store.all("ledger")) if (removedMemory.has(l.memoryId)) await store.remove("ledger", l.id);
   for (const id of demoPatients) await store.remove("patient", id);
   const used = new Set(patients().map((p) => p.villageId));
   for (const v of villages()) if (v.demo && !used.has(v.id)) await store.remove("village", v.id);
@@ -211,7 +221,7 @@ export function visitsCsv(fromMs = 0) {
   const rows = allVisits().filter((v) => v.at >= fromMs).reverse().map((v) => {
     const p = patient(v.patientId) || {};
     const d = new Date(v.at);
-    return [d.toISOString().slice(0, 10), d.toTimeString().slice(0, 5), post.name, post.district, v.patientId, p.sex,
+    return [localDate(v.at), d.toTimeString().slice(0, 5), post.name, post.district, v.patientId, p.sex,
       v.intake.age_years, v.village, v.zone, v.intake.temperature_c, v.intake.fever_days, v.intake.pregnant ? "yes" : "no",
       v.intake.symptoms.join(" "), v.intake.danger_signs.join(" "), v.intake.test_result, v.action, v.score, v.confidence,
       v.abstain ? "yes" : "no", v.feedback || "", p.demo ? "yes" : "no"];
