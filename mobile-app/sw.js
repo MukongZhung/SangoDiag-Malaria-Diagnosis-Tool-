@@ -1,6 +1,6 @@
 // SangoDiag service worker: keeps the whole app on the phone so it opens and decides with no network.
 // Bump VERSION whenever a file changes, so phones pick up the new copy on their next connection.
-const VERSION = "sangodiag-v0.2.2";
+const VERSION = "sangodiag-v0.2.3";
 const APP_FILES = [
   "./",
   "./index.html",

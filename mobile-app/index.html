@@ -29,6 +29,9 @@
     .no-flex-gap .field > * + *, .no-flex-gap .stack > * + *, .no-flex-gap .restore > * + * { margin-top: 8px; }
     .no-flex-gap .villages > * + *, .no-flex-gap .lock > * + * { margin-top: 12px; }
     .no-flex-gap .plist li > button > * + *, .no-flex-gap .vlist li > * + * { margin-top: 2px; }
+    /* "New version available" bar, shown above the content when an update is ready. */
+    .update-bar { position: fixed; left: 12px; right: 12px; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 20; display: flex; align-items: center; justify-content: space-between; padding: 10px 10px 10px 16px; border-radius: 12px; background: #1D1530; color: #fff; font-weight: 600; box-shadow: 0 6px 20px rgba(29,21,48,.35); }
+    .update-bar button { white-space: nowrap; flex: none; margin-left: 12px; min-height: 44px; padding: 0 16px; border: 0; border-radius: 9px; background: #F2C14E; color: #1D1530; font: inherit; font-weight: 700; }
   </style>
   <!-- Fetch every app file at once instead of one after another: much faster on a weak network. -->
   <link rel="modulepreload" href="js/app.js">

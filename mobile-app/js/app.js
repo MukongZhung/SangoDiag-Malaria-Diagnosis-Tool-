@@ -12,7 +12,7 @@ const flat = (a) => a.reduce((out, k) => out.concat(Array.isArray(k) ? flat(k) :
 function fill(el, ...kids) { while (el.firstChild) el.removeChild(el.firstChild); for (const k of flat(kids)) el.append(k); }
 const readText = (file) => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = () => reject(r.error); r.readAsText(file); });
 
-export const VERSION = "0.2.2";
+export const VERSION = "0.2.3";
 const AUTO_LOCK_MS = 5 * 60 * 1000;
 const DAY = 24 * 3600 * 1000;
 
@@ -169,7 +169,10 @@ function afterUnlock() {
 let lastActive = Date.now();
 function touch() { lastActive = Date.now(); }
 ["pointerdown", "keydown"].forEach((ev) => window.addEventListener(ev, touch, { passive: true }));
-function lockNow() { store.lock(); state.stack = []; go("lock", null, { push: false }); }
+function lockNow() {
+  if (updateReady) { store.lock(); location.reload(); return; } // a new version is waiting: load it now
+  store.lock(); state.stack = []; go("lock", null, { push: false });
+}
 setInterval(() => { if (store.isUnlocked() && Date.now() - lastActive > AUTO_LOCK_MS) lockNow(); }, 15000);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && store.isUnlocked() && Date.now() - lastActive > AUTO_LOCK_MS) lockNow();
@@ -601,7 +604,34 @@ async function start() {
   window.addEventListener("offline", updateNet);
   go((await store.isSetUp()) ? "lock" : "setup", null, { push: false });
   window.__sdReady = true;
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  watchForUpdates();
+}
+
+/* ---------- updates ---------- */
+// A new version downloads in the background. When it is ready: on the lock screen the app reloads by itself
+// (nothing to lose); anywhere else a bar offers "Update", so a nurse is never interrupted in a visit.
+let updateReady = false;
+function onUpdateReady() {
+  if (updateReady) return;
+  updateReady = true;
+  if (state.screen === "lock") { location.reload(); return; }
+  const fr = state.lang === "fr";
+  const bar = h("div", { class: "update-bar", role: "status" },
+    h("span", {}, fr ? "Nouvelle version disponible" : "New version available"),
+    h("button", { type: "button", onclick: () => location.reload() }, fr ? "Mettre à jour" : "Update"));
+  document.body.append(bar);
+}
+function watchForUpdates() {
+  if (!("serviceWorker" in navigator)) return;
+  // The very first install also changes the controller: skip that one, react to every later one (updates).
+  let controlled = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (controlled) onUpdateReady(); controlled = true; });
+  navigator.serviceWorker.register("sw.js").then((reg) => {
+    let lastCheck = Date.now();
+    const check = () => { if (navigator.onLine && Date.now() - lastCheck > 60000) { lastCheck = Date.now(); reg.update().catch(() => {}); } };
+    window.addEventListener("online", () => { lastCheck = 0; check(); });
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") check(); });
+  }).catch(() => {});
 }
 
 init();
