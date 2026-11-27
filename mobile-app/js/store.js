@@ -25,12 +25,15 @@ function openDb() {
       db.createObjectStore("meta", { keyPath: "key" });
       db.createObjectStore("records", { keyPath: "k" });
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => { clearTimeout(timer); resolve(req.result); };
+    req.onerror = () => { clearTimeout(timer); reject(req.error); };
+    req.onblocked = () => { clearTimeout(timer); reject(new Error("storage blocked")); };
+    // Some in-app browsers never answer: give up after 10 s so the app can explain instead of loading forever.
+    const timer = setTimeout(() => reject(new Error("storage did not answer")), 10000);
   });
 }
 let dbp = null;
-const db = () => (dbp ||= openDb());
+const db = () => dbp || (dbp = openDb());
 
 function run(storeNames, mode, fn) {
   return db().then((d) => new Promise((resolve, reject) => {
@@ -44,7 +47,7 @@ function run(storeNames, mode, fn) {
 
 async function metaGet(key) {
   const r = await run(["meta"], "readonly", (t) => t.objectStore("meta").get(key));
-  return r ? r.value ?? null : null;
+  return r && r.value !== undefined ? r.value : null;
 }
 async function metaSet(key, value) {
   await run(["meta"], "readwrite", (t) => { t.objectStore("meta").put({ key, value }); });
@@ -96,11 +99,11 @@ export async function unlock(pin) {
   try {
     const v = await open(key, verifier);
     if (v.check !== VERIFIER.check) return false;
-  } catch { return false; }
+  } catch (e) { return false; }
   const rows = await run(["records"], "readonly", (t) => t.objectStore("records").getAll());
   cache.clear();
   for (const r of rows) {
-    try { bucket(r.kind).set(r.id, await open(key, r)); } catch { /* skip a damaged record */ }
+    try { bucket(r.kind).set(r.id, await open(key, r)); } catch (e) { /* skip a damaged record */ }
   }
   KEY = key;
   return true;
@@ -168,7 +171,7 @@ export async function backup(info) {
 export async function restore(file, pin) {
   if (!file || file.format !== "sangodiag-backup" || !Array.isArray(file.records)) throw new Error("not a SangoDiag backup");
   const key = await deriveKey(pin, file.salt);
-  try { await open(key, file.verifier); } catch { return false; }
+  try { await open(key, file.verifier); } catch (e) { return false; }
   await run(["records", "meta"], "readwrite", (t) => {
     const s = t.objectStore("records");
     s.clear();
@@ -181,7 +184,7 @@ export async function restore(file, pin) {
 
 /** Ask the browser not to clear SangoDiag's data when the phone is low on space. */
 export async function askPersistent() {
-  try { return navigator.storage && navigator.storage.persist ? await navigator.storage.persist() : false; } catch { return false; }
+  try { return navigator.storage && navigator.storage.persist ? await navigator.storage.persist() : false; } catch (e) { return false; }
 }
 
 export const newId = (prefix = "") =>

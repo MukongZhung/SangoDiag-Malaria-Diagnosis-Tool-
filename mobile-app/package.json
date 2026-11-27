@@ -1,6 +1,6 @@
 {
   "name": "sangodiag-field-app",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "SangoDiag offline-first field app (PWA) for nurses in rural Cameroon. One Screen, One Next Step.",

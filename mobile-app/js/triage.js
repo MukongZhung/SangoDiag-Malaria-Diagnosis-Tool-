@@ -10,6 +10,9 @@
 //     treatment failure: send for microscopy / clinician review.
 //   - SangoDiag never computes drug doses.
 
+// a ?? b, written out so older phones (Chrome before 80) can run it.
+const nn = (a, b) => (a === null || a === undefined ? b : a);
+
 export const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const SYMPTOMS = ["fever", "chills", "headache", "body_pain", "vomiting", "diarrhoea",
@@ -57,7 +60,7 @@ export function extractEvidence(queryRows, memoryItems, vision, patientId, nowMs
     for (const row of q.rows || []) {
       const low = {};
       for (const [k, v] of Object.entries(row)) low[String(k).toLowerCase()] = v;
-      const pid = low.patient_id ?? null;
+      const pid = nn(low.patient_id, null);
       const mine = pid === null || String(pid) === String(patientId);
       if (pid !== null && String(pid) !== String(patientId) && !("endemic_zone" in low)) continue;
       if (low.village && ev.village === null && mine) {
@@ -65,10 +68,10 @@ export function extractEvidence(queryRows, memoryItems, vision, patientId, nowMs
         ev.cites.village = qid;
       }
       if (low.endemic_zone && ev.endemic_zone === null) {
-        if (ev.village === null || String(low.village ?? ev.village) === ev.village) {
+        if (ev.village === null || String(nn(low.village, ev.village)) === ev.village) {
           ev.endemic_zone = String(low.endemic_zone);
           ev.cites.endemic_zone = qid;
-          const cases = low.active_cases_this_week ?? low.active_cases;
+          const cases = nn(low.active_cases_this_week, low.active_cases);
           if (cases !== null && cases !== undefined && cases !== "" && Number.isFinite(Number(cases))) {
             ev.active_cases = Math.trunc(Number(cases));
             ev.cites.active_cases = qid;
@@ -82,8 +85,8 @@ export function extractEvidence(queryRows, memoryItems, vision, patientId, nowMs
       }
       if (low.visit_id && mine) {
         if (ev.prior_visits.every((v) => v.visit_id !== low.visit_id)) {
-          ev.prior_visits.push({ visit_id: low.visit_id, visit_date: low.visit_date ?? null,
-            fever_temp: low.fever_temp_c ?? low.fever_temp ?? null, cite: qid });
+          ev.prior_visits.push({ visit_id: low.visit_id, visit_date: nn(low.visit_date, null),
+            fever_temp: nn(nn(low.fever_temp_c, low.fever_temp), null), cite: qid });
         }
       }
     }
