@@ -33,6 +33,8 @@ node_modules/
 mobile-app/android/
 mobile-app/tests/fixtures.json
 
-# Built by mobile-app/scripts/build_data.py and the Pages workflow
+# Built by mobile-app/scripts/build_data.py, scripts/vercel-build.mjs and the Pages workflow
 mobile-app/js/data.js
 mobile-app/icons/*.png
+mobile-app/dist/
+.vercel
