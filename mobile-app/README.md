@@ -76,6 +76,15 @@ The full offline flow (setup, PIN, register, two visits, memory, wrong PIN, CSV,
 
 The repository used to be called `SangoDiag-Malaria-Diagnosis-Tool-`. Its old Pages address ended in a dash that messaging apps drop when they make a link, which sent nurses to a 404 page, so it was renamed. Old links to the app no longer work; share the address above.
 
+## If the app keeps loading
+
+Since v0.2.1 the first screen says "Chargement de SangoDiag… / Loading SangoDiag…" and, after 20 seconds, explains what to try. The usual causes:
+
+- **Opened inside WhatsApp, Facebook or Gmail.** Their built-in browsers often block the app's storage. Copy the link and open it in Chrome.
+- **Old Chrome.** The app needs Chrome 61 or newer (2017). Update Chrome from the Play Store.
+- **Very weak network on the first opening.** The first opening downloads about 80 KB. On 2G/EDGE this takes 10 to 20 seconds. After that the app opens from the phone, with no network.
+- **Incognito tab.** Storage is blocked there. Use a normal tab.
+
 ## Connect it to the SangoDiag server (optional)
 
 ```bash
