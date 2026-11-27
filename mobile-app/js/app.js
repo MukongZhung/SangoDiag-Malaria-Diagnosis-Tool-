@@ -12,7 +12,7 @@ const flat = (a) => a.reduce((out, k) => out.concat(Array.isArray(k) ? flat(k) :
 function fill(el, ...kids) { while (el.firstChild) el.removeChild(el.firstChild); for (const k of flat(kids)) el.append(k); }
 const readText = (file) => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = () => reject(r.error); r.readAsText(file); });
 
-export const VERSION = "0.2.1";
+export const VERSION = "0.2.2";
 const AUTO_LOCK_MS = 5 * 60 * 1000;
 const DAY = 24 * 3600 * 1000;
 
@@ -307,7 +307,15 @@ SCREENS.visit = ({ patientId, preset }) => {
   return h("form", { novalidate: true, onsubmit: async (e) => {
     e.preventDefault();
     const tv = num(temp.value);
-    if (tv !== null && !(tv >= 30 && tv <= 45)) { err.textContent = t("temp"); temp.focus(); return; }
+    if (tv !== null && !(tv >= 30 && tv <= 45)) {
+      err.textContent = state.lang === "fr" ? "La température doit être entre 30 et 45 °C." : "Temperature must be between 30 and 45 °C.";
+      temp.focus(); return;
+    }
+    const fd = num(days.value);
+    if (fd !== null && !(fd >= 0 && fd <= 60)) {
+      err.textContent = state.lang === "fr" ? "Jours de fièvre : entre 0 et 60." : "Days of fever: between 0 and 60.";
+      days.focus(); return;
+    }
     const intake = {
       patient_id: p.id, temperature_c: tv, fever_days: num(days.value), age_years: age, pregnant: flags.has("pregnant"),
       symptoms: SYMPTOMS.filter((s) => sym.has(s)), danger_signs: DANGER_SIGNS.filter((d) => dan.has(d)),
@@ -333,7 +341,7 @@ async function decide(p, intake) {
   const memories = rec.recall(p.id);
   const ev = extractEvidence(rec.evidenceRows(p), memories, null, p.id, now);
   const result = triage(intake, ev);
-  const today = new Date(now).toISOString().slice(0, 10);
+  const today = rec.localDate(now);
   const zone = ev.endemic_zone ? `${ev.village} ${ev.endemic_zone} zone` : "zone unknown";
   const visit = await rec.saveVisit({ patientId: p.id, intake, result, evidence: ev,
     observation: `Visit ${today}: ${describeIntake(intake)}.`,
@@ -474,7 +482,7 @@ SCREENS.settings = () => {
   const oldPin = h("input", { type: "password", inputmode: "numeric", maxlength: "8", class: "pin" });
   const newPin = h("input", { type: "password", inputmode: "numeric", maxlength: "8", class: "pin" });
   const month = new Date(); month.setDate(1); month.setHours(0, 0, 0, 0);
-  const stamp = new Date().toISOString().slice(0, 10);
+  const stamp = rec.localDate(Date.now());
   const slug = (post.name || "sangodiag").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
   async function saveAll() {
@@ -574,7 +582,17 @@ async function init() {
   }
 }
 
+// Chrome before 84 ignores `gap` in flex layouts: detect it so index.html can add spacing with margins instead.
+function flexGapWorks() {
+  const box = h("div", { style: "display:flex;flex-direction:column;row-gap:1px;position:absolute;visibility:hidden" }, h("div"), h("div"));
+  document.body.append(box);
+  const ok = box.scrollHeight === 1;
+  box.remove();
+  return ok;
+}
+
 async function start() {
+  if (!flexGapWorks()) document.documentElement.classList.add("no-flex-gap");
   state.lang = (await store.getPlain("lang")) || ((navigator.language || "en").startsWith("fr") ? "fr" : "en");
   state.server = (await store.getPlain("server")) || "";
   applyChrome();

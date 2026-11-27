@@ -1,6 +1,6 @@
 // SangoDiag service worker: keeps the whole app on the phone so it opens and decides with no network.
 // Bump VERSION whenever a file changes, so phones pick up the new copy on their next connection.
-const VERSION = "sangodiag-v0.2.1";
+const VERSION = "sangodiag-v0.2.2";
 const APP_FILES = [
   "./",
   "./index.html",
@@ -23,7 +23,8 @@ self.addEventListener("install", (event) => {
   // Cache file by file, so one missing file (e.g. icons not built locally) never blocks offline use.
   event.waitUntil(
     caches.open(VERSION)
-      .then((c) => Promise.all(APP_FILES.map((f) => c.add(f).catch(() => null))))
+      // cache: "reload" skips the browser's HTTP cache, so a new version never mixes with old files.
+      .then((c) => Promise.all(APP_FILES.map((f) => c.add(new Request(f, { cache: "reload" })).catch(() => null))))
       .then(() => self.skipWaiting()),
   );
 });
