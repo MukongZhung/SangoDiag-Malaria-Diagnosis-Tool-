@@ -450,7 +450,8 @@ export function pack(lang) {
 }
 
 export function ui(lang, key, ...args) {
-  const v = pack(lang).ui[key] ?? L.en.ui[key] ?? key;
+  const p = pack(lang).ui[key], e = L.en.ui[key];
+  const v = p !== null && p !== undefined ? p : e !== null && e !== undefined ? e : key;
   return typeof v === "function" ? v(...args) : v;
 }
 
