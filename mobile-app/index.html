@@ -10,6 +10,26 @@
   <link rel="icon" href="icons/logo.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="app.css">
+  <style>
+    /* ---------- first load: shown until the app starts, or explains why it cannot ---------- */
+    .boot { padding: 48px 8px 24px; text-align: center; }
+    .boot p { margin: 0 0 12px; }
+    .boot ol { text-align: left; margin: 12px 0 16px; padding-left: 22px; line-height: 1.5; }
+    .boot li { margin-bottom: 8px; }
+    #boot-help { margin-top: 20px; padding: 16px; border-radius: 12px; background: #fff4ef; border: 1px solid #f3c2b4; text-align: left; }
+    #boot-help button { width: 100%; min-height: 48px; border: 0; border-radius: 10px; background: #5B3A8E; color: #fff; font: inherit; font-weight: 600; }
+    .spinner { width: 44px; height: 44px; margin: 0 auto 20px; border-radius: 50%; border: 4px solid #e4dbf3; border-top-color: #5B3A8E; animation: sd-spin 0.9s linear infinite; }
+    @keyframes sd-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.5s; } }
+  </style>
+  <!-- Fetch every app file at once instead of one after another: much faster on a weak network. -->
+  <link rel="modulepreload" href="js/app.js">
+  <link rel="modulepreload" href="js/triage.js">
+  <link rel="modulepreload" href="js/i18n.js">
+  <link rel="modulepreload" href="js/register.js">
+  <link rel="modulepreload" href="js/data.js">
+  <link rel="modulepreload" href="js/store.js">
+  <link rel="modulepreload" href="js/records.js">
 </head>
 <body>
   <header class="bar">
@@ -23,8 +43,49 @@
       <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
     </button>
   </header>
-  <main id="view" class="screen" aria-live="polite"></main>
-  <noscript>SangoDiag needs JavaScript. Open this page in Chrome.</noscript>
+  <main id="view" class="screen" aria-live="polite">
+    <div id="boot" class="boot">
+      <div class="spinner" aria-hidden="true"></div>
+      <p><strong>Chargement de SangoDiag…</strong><br>Loading SangoDiag…</p>
+      <p class="hint">La première ouverture demande un peu de réseau. Ensuite, l'application marche sans réseau.<br>
+        The first opening needs some network. After that, the app works offline.</p>
+      <div id="boot-help" hidden></div>
+    </div>
+  </main>
+  <noscript>SangoDiag a besoin de JavaScript. Ouvrez cette page dans Chrome. / SangoDiag needs JavaScript. Open this page in Chrome.</noscript>
+  <script>
+    // Runs on every phone, even an old one: if the app cannot start, say why instead of loading forever.
+    (function () {
+      function help(kind) {
+        if (window.__sdReady) return;
+        var box = document.getElementById("boot-help");
+        if (!box) return;
+        var msg = {
+          old: "<p><strong>Ce navigateur est trop ancien pour SangoDiag.</strong><br>This browser is too old for SangoDiag.</p>" +
+               "<ol><li>Ouvrez le Play Store et mettez à jour <b>Google Chrome</b>. / Update <b>Google Chrome</b> from the Play Store.</li>" +
+               "<li>Rouvrez le lien dans Chrome. / Open the link again in Chrome.</li></ol>",
+          slow: "<p><strong>Le chargement prend du temps.</strong><br>Loading is taking a while.</p>" +
+                "<ol><li>Vérifiez que les données mobiles sont activées. / Check that mobile data is on.</li>" +
+                "<li>Ouvrez le lien dans <b>Chrome</b>, pas dans WhatsApp, Facebook ou Gmail. / Open the link in <b>Chrome</b>, not inside WhatsApp, Facebook or Gmail.</li>" +
+                "<li>Si Chrome est ancien, mettez-le à jour depuis le Play Store. / If Chrome is old, update it from the Play Store.</li></ol>",
+          failed: "<p><strong>SangoDiag n'a pas pu démarrer.</strong><br>SangoDiag could not start.</p>" +
+                  "<ol><li>Mettez à jour <b>Google Chrome</b> depuis le Play Store. / Update <b>Google Chrome</b> from the Play Store.</li>" +
+                  "<li>Ouvrez le lien dans Chrome, pas dans WhatsApp ou Gmail, et pas en navigation privée. / Open the link in Chrome, not inside WhatsApp or Gmail, and not in an incognito tab.</li></ol>"
+        }[kind];
+        box.innerHTML = msg + '<button type="button" onclick="location.reload()">Réessayer / Try again</button>';
+        box.hidden = false;
+        if (kind !== "slow") { var s = document.querySelector("#boot .spinner"); if (s) s.hidden = true; }
+      }
+      window.__sdHelp = help;
+      var s = document.createElement("script");
+      if (!("noModule" in s) || !window.indexedDB || !(window.crypto && window.crypto.subtle) || !window.Promise) { help("old"); return; }
+      window.addEventListener("error", function (e) {
+        // A file that failed to load or a script this browser cannot run.
+        if (!window.__sdReady && (e.target && e.target.tagName === "SCRIPT" || e.error instanceof SyntaxError)) help("failed");
+      }, true);
+      setTimeout(function () { help("slow"); }, 20000);
+    })();
+  </script>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>

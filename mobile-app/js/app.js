@@ -5,8 +5,14 @@ import { LANGS, pack, ui, renderReason, renderStep } from "./i18n.js";
 import { DEMO_CASES } from "./register.js";
 import * as store from "./store.js";
 import * as rec from "./records.js";
+// a ?? b, written out so older phones (Chrome before 80) can run it.
+const nn = (a, b) => (a === null || a === undefined ? b : a);
+// Small stand-ins for newer browser functions, so the app also runs on older Android phones.
+const flat = (a) => a.reduce((out, k) => out.concat(Array.isArray(k) ? flat(k) : [k]), []);
+function fill(el, ...kids) { while (el.firstChild) el.removeChild(el.firstChild); for (const k of flat(kids)) el.append(k); }
+const readText = (file) => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = () => reject(r.error); r.readAsText(file); });
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.2.1";
 const AUTO_LOCK_MS = 5 * 60 * 1000;
 const DAY = 24 * 3600 * 1000;
 
@@ -24,11 +30,11 @@ function h(tag, attrs = {}, ...kids) {
     else if (k === "value") el.value = v;
     else el.setAttribute(k, v === true ? "" : v);
   }
-  for (const k of kids.flat()) if (k !== null && k !== undefined && k !== false) el.append(k.nodeType ? k : String(k));
+  for (const k of flat(kids)) if (k !== null && k !== undefined && k !== false) el.append(k.nodeType ? k : String(k));
   return el;
 }
 const field = (label, input, hint) => h("label", { class: "field" }, h("span", {}, label), input, hint ? h("small", { class: "hint" }, hint) : null);
-const num = (v) => { const s = String(v ?? "").trim().replace(",", "."); return s === "" ? null : Number(s); };
+const num = (v) => { const s = String(nn(v, "")).trim().replace(",", "."); return s === "" ? null : Number(s); };
 const fmtDate = (ms) => new Date(ms).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" });
 const fmtDateTime = (ms) => new Date(ms).toLocaleString(state.lang, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
@@ -54,7 +60,7 @@ function go(name, args = null, { push = true } = {}) {
   state.args = args;
   $("#open-settings").hidden = !store.isUnlocked() || name === "settings";
   const view = $("#view");
-  view.replaceChildren(SCREENS[name](args));
+  fill(view, SCREENS[name](args));
   window.scrollTo(0, 0);
 }
 function back() {
@@ -88,14 +94,14 @@ function villageEditor(list, onChange) {
   // list: array of {id?, name, zone, cases}
   const wrap = h("div", { class: "villages" });
   const render = () => {
-    wrap.replaceChildren(...list.map((v, i) => {
+    fill(wrap, ...list.map((v, i) => {
       const nameI = h("input", { value: v.name || "", maxlength: "60", "aria-label": t("village_name"), placeholder: t("village_name"),
         oninput: (e) => { v.name = e.target.value; onChange && onChange(v); } });
       const zoneS = h("select", { "aria-label": t("zone"), onchange: (e) => { v.zone = e.target.value || null; onChange && onChange(v); } },
         h("option", { value: "" }, t("zone_unknown")),
         ...rec.ZONES.map((z) => h("option", { value: z }, t(`zone_${z}`))));
       zoneS.value = v.zone || "";
-      const casesI = h("input", { type: "number", inputmode: "numeric", min: "0", value: v.cases ?? "", "aria-label": t("cases_week"), placeholder: "0",
+      const casesI = h("input", { type: "number", inputmode: "numeric", min: "0", value: nn(v.cases, ""), "aria-label": t("cases_week"), placeholder: "0",
         oninput: (e) => { v.cases = e.target.value; onChange && onChange(v); } });
       const age = v.updatedAt ? Math.floor((Date.now() - v.updatedAt) / DAY) : null;
       return h("div", { class: "village-row" },
@@ -178,10 +184,10 @@ SCREENS.home = () => {
     const q = search.value;
     const hits = rec.searchPatients(q).slice(0, 50);
     if (!hits.length) {
-      list.replaceChildren(h("li", { class: "empty" }, rec.patients().length ? t("no_match") : t("no_patients")));
+      fill(list, h("li", { class: "empty" }, rec.patients().length ? t("no_match") : t("no_patients")));
       return;
     }
-    list.replaceChildren(...hits.map((p) => {
+    fill(list, ...hits.map((p) => {
       const last = rec.visitsFor(p.id)[0];
       return h("li", {}, h("button", { type: "button", onclick: () => go("patient", p.id) },
         h("span", { class: "pname" }, p.name, p.demo ? h("em", { class: "tag" }, t("demo_tag")) : null),
@@ -214,7 +220,7 @@ SCREENS.patientForm = (id) => {
   const sexSeg = h("div", { class: "seg" }, ...["F", "M"].map((s) => h("button", { type: "button", "aria-pressed": String(sex === s),
     onclick: (e) => { sex = s; sexSeg.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", "false")); e.currentTarget.setAttribute("aria-pressed", "true"); } },
   s === "F" ? t("female") : t("male"))));
-  const age = h("input", { type: "text", inputmode: "decimal", maxlength: "5", autocomplete: "off", value: p ? rec.ageNow(p) ?? "" : "" });
+  const age = h("input", { type: "text", inputmode: "decimal", maxlength: "5", autocomplete: "off", value: p ? nn(rec.ageNow(p), "") : "" });
   const vSel = h("select", {}, h("option", { value: "" }, "—"), ...rec.villages().map((v) => h("option", { value: v.id }, v.name)));
   vSel.value = p ? p.villageId || "" : "";
   const phone = h("input", { type: "tel", inputmode: "tel", value: p ? p.phone : "", maxlength: "20", autocomplete: "off" });
@@ -290,8 +296,8 @@ SCREENS.visit = ({ patientId, preset }) => {
   const flags = new Set([pre.pregnant && "pregnant", pre.recent_travel && "travel", pre.household_cases && "household"].filter(Boolean));
   let test = pre.test_result || "not_done";
   const err = h("p", { class: "form-error", role: "alert" });
-  const temp = h("input", { type: "text", inputmode: "decimal", maxlength: "5", autocomplete: "off", placeholder: state.lang === "fr" ? "38,5" : "38.5", value: pre.temperature_c ?? "" });
-  const days = h("input", { type: "number", inputmode: "numeric", min: "0", max: "60", value: pre.fever_days ?? "" });
+  const temp = h("input", { type: "text", inputmode: "decimal", maxlength: "5", autocomplete: "off", placeholder: state.lang === "fr" ? "38,5" : "38.5", value: nn(pre.temperature_c, "") });
+  const days = h("input", { type: "number", inputmode: "numeric", min: "0", max: "60", value: nn(pre.fever_days, "") });
   const notes = h("textarea", { rows: "2", maxlength: "300" });
   const age = rec.ageNow(p);
   const canBePregnant = p.sex === "F" && age !== null && age >= 12 && age <= 50;
@@ -397,18 +403,18 @@ SCREENS.result = ({ patientId, result, memories }) => {
 /* ---------- server (optional) ---------- */
 async function askServer(intake, visitId) {
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 120000);
-    const r = await fetch(`${state.server.replace(/\/$/, "")}/diagnose`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(intake), signal: ctrl.signal });
+    const ctrl = window.AbortController ? new AbortController() : null;
+    const timer = setTimeout(() => ctrl && ctrl.abort(), 120000);
+    const r = await fetch(`${state.server.replace(/\/$/, "")}/diagnose`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(intake), signal: ctrl ? ctrl.signal : undefined });
     clearTimeout(timer);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     const note = $("#server-result");
     if (note && data.report) {
-      note.replaceChildren(h("h2", {}, t("engine_server")), h("div", { class: "server-note" }, data.report.replace(/\*\*(.+?)\*\*/g, "$1").replace(/^\s*[-*] /gm, "• ")));
+      fill(note, h("h2", {}, t("engine_server")), h("div", { class: "server-note" }, data.report.replace(/\*\*(.+?)\*\*/g, "$1").replace(/^\s*[-*] /gm, "• ")));
       note.hidden = false;
     }
-  } catch { await rec.queue({ id: visitId, intake, at: Date.now() }); }
+  } catch (e) { await rec.queue({ id: visitId, intake, at: Date.now() }); }
 }
 async function syncOutbox() {
   if (!state.server || !navigator.onLine || !store.isUnlocked()) return;
@@ -416,7 +422,7 @@ async function syncOutbox() {
     try {
       const r = await fetch(`${state.server.replace(/\/$/, "")}/diagnose`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(item.intake) });
       if (r.ok) await rec.unqueue(item.id); else break;
-    } catch { break; }
+    } catch (e) { break; }
   }
 }
 
@@ -447,7 +453,7 @@ function restoreControl(onDone) {
       const f = fileI.files && fileI.files[0];
       if (!f) return;
       let data;
-      try { data = JSON.parse(await f.text()); } catch { msg.textContent = t("not_backup"); return; }
+      try { data = JSON.parse(await readText(f)); } catch (e) { msg.textContent = t("not_backup"); return; }
       if (!data || data.format !== "sangodiag-backup") { msg.textContent = t("not_backup"); return; }
       if (!confirm(t("restore_confirm"))) return;
       const ok = await store.restore(data, pinI.value);
@@ -562,6 +568,13 @@ function updateNet() {
 }
 
 async function init() {
+  try { await start(); } catch (e) {
+    // Usually: storage blocked (in-app browser, incognito tab) or a very old browser.
+    if (window.__sdHelp) window.__sdHelp("failed");
+  }
+}
+
+async function start() {
   state.lang = (await store.getPlain("lang")) || ((navigator.language || "en").startsWith("fr") ? "fr" : "en");
   state.server = (await store.getPlain("server")) || "";
   applyChrome();
@@ -569,6 +582,7 @@ async function init() {
   window.addEventListener("online", () => { updateNet(); syncOutbox(); });
   window.addEventListener("offline", updateNet);
   go((await store.isSetUp()) ? "lock" : "setup", null, { push: false });
+  window.__sdReady = true;
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
